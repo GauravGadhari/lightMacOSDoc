@@ -161,11 +161,8 @@ Item {
                 }
 
                 if (dragTriggered) {
-                    // Check if dragged far above dock for removal
-                    var globalPt = mapToItem(null, mouse.x, mouse.y);
                     root.isMarkedForRemoval = (mouse.y < -70);
 
-                    // Horizontal rearrange when dragging
                     if (!root.isMarkedForRemoval) {
                         if (dx > root.width * 0.75) {
                             dockManager.moveApp(root.itemIndex, root.itemIndex + 1);
@@ -183,14 +180,12 @@ Item {
             if (mouse.button === Qt.LeftButton) {
                 if (dragTriggered) {
                     if (root.isMarkedForRemoval) {
-                        // Dragged out of dock -> Remove!
                         if (appData) dockManager.removeAppById(appData.id);
                     }
                     root.isDragging = false;
                     root.isMarkedForRemoval = false;
                     dragTriggered = false;
                 } else {
-                    // Normal Click
                     triggerBounce();
                     if (appData) {
                         dockManager.launchOrToggleApp(appData.id);
@@ -236,6 +231,24 @@ Item {
             }
         }
 
+        // Multi-Window Submenu when app has multiple windows open
+        Menu {
+            title: "Open Windows (" + (appData ? appData.windowCount : 0) + ")"
+            visible: appData ? (appData.windowCount > 1) : false
+
+            Instantiator {
+                model: (appData && appData.windows) ? appData.windows : []
+                delegate: MenuItem {
+                    text: (modelData.active ? "● " : "  ") + (modelData.title ? (modelData.title.length > 35 ? modelData.title.substring(0, 32) + "..." : modelData.title) : "Window")
+                    onTriggered: {
+                        dockManager.activateWindow(modelData.id);
+                    }
+                }
+                onObjectAdded: (index, object) => parent.insertItem(index, object)
+                onObjectRemoved: (index, object) => parent.removeItem(object)
+            }
+        }
+
         MenuItem {
             visible: appData ? appData.isRunning : false
             text: "Minimize"
@@ -257,7 +270,18 @@ Item {
         Menu {
             title: "Options"
 
+            // Keep in Dock (for dynamic unpinned running apps)
             MenuItem {
+                visible: appData ? !appData.isPinned : false
+                text: "Keep in Dock"
+                onTriggered: {
+                    if (appData) dockManager.pinApp(appData.id);
+                }
+            }
+
+            // Remove from Dock (for pinned apps)
+            MenuItem {
+                visible: appData ? appData.isPinned : true
                 text: "Remove from Dock"
                 onTriggered: {
                     if (appData) dockManager.removeAppById(appData.id);

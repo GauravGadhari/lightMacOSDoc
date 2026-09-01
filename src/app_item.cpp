@@ -6,6 +6,7 @@ AppItem::AppItem(const QString &id,
                  const QString &execCommand,
                  bool dockBreaksBefore,
                  bool isSeparator,
+                 bool isPinned,
                  QObject *parent)
     : QObject(parent),
       m_id(id),
@@ -13,7 +14,8 @@ AppItem::AppItem(const QString &id,
       m_icon(icon),
       m_execCommand(execCommand),
       m_isSeparator(isSeparator),
-      m_dockBreaksBefore(dockBreaksBefore) {}
+      m_dockBreaksBefore(dockBreaksBefore),
+      m_isPinned(isPinned) {}
 
 void AppItem::setTitle(const QString &title) {
     if (m_title != title) {
@@ -64,6 +66,29 @@ void AppItem::setDockBreaksBefore(bool breaks) {
     }
 }
 
+void AppItem::setIsPinned(bool pinned) {
+    if (m_isPinned != pinned) {
+        m_isPinned = pinned;
+        emit isPinnedChanged();
+    }
+}
+
+void AppItem::setWindows(const QVariantList &windows) {
+    m_windows = windows;
+    emit windowsChanged();
+    setIsRunning(!m_windows.isEmpty());
+
+    bool active = false;
+    for (const QVariant &v : m_windows) {
+        QVariantMap map = v.toMap();
+        if (map.value("active").toBool()) {
+            active = true;
+            break;
+        }
+    }
+    setIsActive(active);
+}
+
 QJsonObject AppItem::toJson() const {
     QJsonObject obj;
     obj["id"] = m_id;
@@ -72,6 +97,7 @@ QJsonObject AppItem::toJson() const {
     obj["execCommand"] = m_execCommand;
     obj["dockBreaksBefore"] = m_dockBreaksBefore;
     obj["isSeparator"] = m_isSeparator;
+    obj["isPinned"] = m_isPinned;
     return obj;
 }
 
@@ -82,7 +108,8 @@ AppItem* AppItem::fromJson(const QJsonObject &json, QObject *parent) {
     QString exec = json["execCommand"].toString();
     bool breaks = json["dockBreaksBefore"].toBool();
     bool isSep = json["isSeparator"].toBool();
+    bool pinned = json.contains("isPinned") ? json["isPinned"].toBool() : true;
 
     if (id.isEmpty()) return nullptr;
-    return new AppItem(id, title, icon, exec, breaks, isSep, parent);
+    return new AppItem(id, title, icon, exec, breaks, isSep, pinned, parent);
 }

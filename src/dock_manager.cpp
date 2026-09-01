@@ -13,6 +13,7 @@
 #include <QJsonObject>
 #include <QDateTime>
 #include <QRegularExpression>
+#include <QSet>
 
 DockManager::DockManager(QObject *parent) : QObject(parent) {
     if (!loadApps()) {
@@ -20,18 +21,18 @@ DockManager::DockManager(QObject *parent) : QObject(parent) {
         saveApps();
     }
 
+    // Register D-Bus Service for KWin Scripting Bridge
+    QDBusConnection::sessionBus().registerService("org.kde.MacOSDock");
+    QDBusConnection::sessionBus().registerObject("/WindowTracker", this, QDBusConnection::ExportAllSlots);
+
+    setupKWinWindowTracker();
+
     m_pollTimer = new QTimer(this);
-    connect(m_pollTimer, &QTimer::timeout, this, [this]() {
-        refreshRunningStatus();
-        checkDesktopState();
-    });
+    connect(m_pollTimer, &QTimer::timeout, this, &DockManager::refreshRunningStatus);
     m_pollTimer->start(1000);
 
     // Initial check
-    QTimer::singleShot(200, this, [this]() {
-        refreshRunningStatus();
-        checkDesktopState();
-    });
+    QTimer::singleShot(200, this, &DockManager::refreshRunningStatus);
 }
 
 DockManager::~DockManager() {
@@ -50,23 +51,6 @@ void DockManager::setIsMenuOpen(bool open) {
     }
 }
 
-void DockManager::checkDesktopState() {
-    // Check if there are active windows or if user is on desktop
-    // We query KWin via D-Bus to see if the active window is a normal app or empty desktop
-    QDBusInterface kwinIface("org.kde.KWin", "/KWin", "org.kde.KWin", QDBusConnection::sessionBus());
-    if (kwinIface.isValid()) {
-        QDBusReply<QString> reply = kwinIface.call("activeWindow");
-        if (reply.isValid()) {
-            QString activeWin = reply.value();
-            bool onDesk = activeWin.isEmpty() || activeWin.contains("plasma", Qt::CaseInsensitive) || activeWin.contains("desktop", Qt::CaseInsensitive);
-            if (m_isOnDesktop != onDesk) {
-                m_isOnDesktop = onDesk;
-                emit isOnDesktopChanged();
-            }
-        }
-    }
-}
-
 void DockManager::setAutoHidden(bool hidden) {
     m_isAutoHidden = hidden;
     qDebug() << "[DockManager] setAutoHidden called:" << hidden;
@@ -82,17 +66,11 @@ void DockManager::updateMask(int x, int y, int width, int height) {
     int winH = m_window->height();
     int winW = m_window->width();
 
-    // Generous horizontal margin (100px on left and right) so magnified edge icons
-    // (Finder on left, GitHub on right) and their shadows are NEVER clipped.
     int maskX = qMax(0, x - 100);
     int maskW = qMin(winW - maskX, width + 200);
-
-    // Full vertical window headroom (from y=0 to y=winH) so bouncing icons,
-    // 2x magnified icons, and tooltips are NEVER clipped by the X11 shape mask.
     int maskY = 0;
     int maskH = winH;
 
-    // Full dock active region + bottom 6px trigger strip across the whole screen width
     QRegion dockRegion(maskX, maskY, maskW, maskH);
     QRegion triggerStrip(0, winH - 6, winW, 6);
 
@@ -103,8 +81,6 @@ void DockManager::resetMask() {
     if (!m_window) return;
 
     int winW = m_window->width();
-    // When the window is shifted down to (realScreenHeight - 6),
-    // the top 6px of the window (y=0 to y=6) is the part on-screen.
     m_window->setMask(QRegion(0, 0, winW, 6));
 }
 
@@ -118,7 +94,8 @@ void DockManager::saveApps() {
     QJsonArray array;
     for (QObject *obj : m_apps) {
         auto *item = qobject_cast<AppItem*>(obj);
-        if (item) {
+        // ONLY persist pinned apps
+        if (item && item->isPinned()) {
             array.append(item->toJson());
         }
     }
@@ -195,6 +172,18 @@ void DockManager::removeAppById(const QString &id) {
     }
 }
 
+void DockManager::pinApp(const QString &id) {
+    for (QObject *obj : m_apps) {
+        auto *item = qobject_cast<AppItem*>(obj);
+        if (item && item->id() == id) {
+            item->setIsPinned(true);
+            saveApps();
+            emit appsChanged();
+            return;
+        }
+    }
+}
+
 void DockManager::toggleDividerBefore(const QString &id) {
     for (QObject *obj : m_apps) {
         auto *item = qobject_cast<AppItem*>(obj);
@@ -207,7 +196,6 @@ void DockManager::toggleDividerBefore(const QString &id) {
 }
 
 void DockManager::addApp(const QString &id, const QString &title, const QString &icon, const QString &execCommand, bool dockBreaksBefore) {
-    // Avoid duplicate IDs
     QString uniqueId = id;
     int counter = 1;
     bool exists = true;
@@ -223,7 +211,7 @@ void DockManager::addApp(const QString &id, const QString &title, const QString 
         }
     }
 
-    auto *item = new AppItem(uniqueId, title, icon, execCommand, dockBreaksBefore, false, this);
+    auto *item = new AppItem(uniqueId, title, icon, execCommand, dockBreaksBefore, false, true, this);
     m_apps.append(item);
     emit appsChanged();
     saveApps();
@@ -235,13 +223,18 @@ QString DockManager::resolveSystemIcon(const QString &iconName) {
         return iconName.startsWith("/") ? ("file://" + iconName) : iconName;
     }
 
-    // Search common icon locations
+    QString cleanName = iconName;
+    if (cleanName.endsWith(".png") || cleanName.endsWith(".svg") || cleanName.endsWith(".xpm")) {
+        cleanName = QFileInfo(cleanName).completeBaseName();
+    }
+
     QStringList searchPaths = {
         "/usr/share/icons/hicolor/256x256/apps/",
         "/usr/share/icons/hicolor/128x128/apps/",
+        "/usr/share/icons/hicolor/scalable/apps/",
         "/usr/share/icons/hicolor/64x64/apps/",
         "/usr/share/icons/hicolor/48x48/apps/",
-        "/usr/share/icons/hicolor/scalable/apps/",
+        "/usr/share/icons/breeze/apps/48/",
         "/usr/share/pixmaps/",
         QDir::homePath() + "/.local/share/icons/hicolor/256x256/apps/",
         QDir::homePath() + "/.local/share/icons/hicolor/scalable/apps/"
@@ -251,7 +244,7 @@ QString DockManager::resolveSystemIcon(const QString &iconName) {
 
     for (const QString &dir : searchPaths) {
         for (const QString &ext : extensions) {
-            QString fullPath = dir + iconName + ext;
+            QString fullPath = dir + cleanName + ext;
             if (QFile::exists(fullPath)) {
                 return "file://" + fullPath;
             }
@@ -280,7 +273,6 @@ QString DockManager::parseDesktopFile(const QString &path, QString &title, QStri
                 title = line.mid(5).trimmed();
             } else if (line.startsWith("Exec=") && exec.isEmpty()) {
                 exec = line.mid(5).trimmed();
-                // Strip field codes (%f, %F, %u, %U, %i, %c, %k, %v, %m)
                 exec.remove(QRegularExpression("%[fFuUickvm]"));
                 exec = exec.trimmed();
             } else if (line.startsWith("Icon=") && icon.isEmpty()) {
@@ -340,7 +332,6 @@ void DockManager::addAppFromText(const QString &text) {
         if (host.startsWith("www.")) host = host.mid(4);
 
         QString title = host.isEmpty() ? "Web Link" : host;
-        // Capitalize title
         if (!title.isEmpty()) {
             title[0] = title[0].toUpper();
         }
@@ -354,7 +345,7 @@ void DockManager::addAppFromText(const QString &text) {
 }
 
 QString DockManager::getAppQuery(const QString &id) {
-    if (id == "finder") return "dolphin";
+    if (id == "finder") return "dolphin|nautilus|nemo";
     if (id == "safari") return "chrome|firefox|brave|chromium";
     if (id == "messages") return "whatsapp";
     if (id == "terminal") return "konsole|terminal|alacritty|kitty";
@@ -398,49 +389,273 @@ bool DockManager::runKWinScript(const QString &scriptCode, QString *outResult) {
     return true;
 }
 
+void DockManager::setupKWinWindowTracker() {
+    // Persistent KWin Script that listens for window events and sends them over D-Bus
+    QString script = R"(
+        function notifyWindows() {
+            var list = [];
+            var clients = workspace.windowList();
+            for (var i = 0; i < clients.length; i++) {
+                var c = clients[i];
+                if (!c.normalWindow) continue;
+                list.push({
+                    "id": c.internalId ? c.internalId.toString() : ("win_" + i),
+                    "desktopFile": c.desktopFileName ? c.desktopFileName : "",
+                    "resourceClass": c.resourceClass ? c.resourceClass : "",
+                    "resourceName": c.resourceName ? c.resourceName : "",
+                    "caption": c.caption ? c.caption : "",
+                    "minimized": c.minimized ? true : false,
+                    "active": (workspace.activeWindow === c),
+                    "pid": c.pid ? c.pid : 0
+                });
+            }
+            callDBus("org.kde.MacOSDock", "/WindowTracker", "org.kde.MacOSDock", "updateWindows", JSON.stringify(list));
+        }
+
+        try {
+            workspace.windowAdded.connect(notifyWindows);
+            workspace.windowRemoved.connect(notifyWindows);
+            workspace.windowActivated.connect(notifyWindows);
+            notifyWindows();
+        } catch(e) {
+            notifyWindows();
+        }
+    )";
+
+    runKWinScript(script);
+}
+
+void DockManager::updateWindows(const QString &json) {
+    QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (doc.isArray()) {
+        matchWindowsToApps(doc.array());
+    }
+}
+
+void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
+    // Map of AppItem* -> QVariantList of window maps
+    QMap<AppItem*, QVariantList> appWindows;
+    for (QObject *obj : m_apps) {
+        auto *item = qobject_cast<AppItem*>(obj);
+        if (item) {
+            appWindows[item] = QVariantList();
+        }
+    }
+
+    struct UnassignedWin {
+        QString id;
+        QString desktopFile;
+        QString resourceClass;
+        QString resourceName;
+        QString caption;
+        bool minimized;
+        bool active;
+    };
+
+    QList<UnassignedWin> unassigned;
+
+    for (const QJsonValue &val : windowList) {
+        if (!val.isObject()) continue;
+        QJsonObject obj = val.toObject();
+
+        QString winId = obj["id"].toString();
+        QString desktopFile = obj["desktopFile"].toString().toLower();
+        QString resourceClass = obj["resourceClass"].toString().toLower();
+        QString resourceName = obj["resourceName"].toString().toLower();
+        QString caption = obj["caption"].toString();
+        bool minimized = obj["minimized"].toBool();
+        bool active = obj["active"].toBool();
+
+        QVariantMap winMap;
+        winMap["id"] = winId;
+        winMap["title"] = caption.isEmpty() ? resourceClass : caption;
+        winMap["minimized"] = minimized;
+        winMap["active"] = active;
+
+        bool matched = false;
+
+        // Try to match against existing app items in dock
+        for (QObject *appObj : m_apps) {
+            auto *item = qobject_cast<AppItem*>(appObj);
+            if (!item) continue;
+
+            QString appId = item->id().toLower();
+            QString appQuery = getAppQuery(appId);
+            QStringList queries = appQuery.split("|");
+
+            bool isMatch = (appId == desktopFile || appId == resourceClass || appId == resourceName);
+            if (!isMatch) {
+                for (const QString &q : queries) {
+                    if (!q.isEmpty() && (desktopFile.contains(q) || resourceClass.contains(q) || resourceName.contains(q))) {
+                        isMatch = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isMatch) {
+                appWindows[item].append(winMap);
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched) {
+            unassigned.append({winId, desktopFile, resourceClass, resourceName, caption, minimized, active});
+        }
+    }
+
+    // Assign windows to matched apps
+    for (auto it = appWindows.begin(); it != appWindows.end(); ++it) {
+        it.key()->setWindows(it.value());
+    }
+
+    // Process unassigned windows (Dynamic Unpinned Running Apps)
+    bool structureChanged = false;
+    QMap<QString, QList<UnassignedWin>> grouped;
+    for (const auto &uw : unassigned) {
+        QString key = !uw.desktopFile.isEmpty() ? uw.desktopFile : (!uw.resourceClass.isEmpty() ? uw.resourceClass : uw.resourceName);
+        if (!key.isEmpty()) {
+            grouped[key].append(uw);
+        }
+    }
+
+    for (auto it = grouped.begin(); it != grouped.end(); ++it) {
+        QString key = it.key();
+        const auto &wins = it.value();
+
+        // Check if an unpinned item already exists for this key
+        AppItem *targetItem = nullptr;
+        for (QObject *obj : m_apps) {
+            auto *item = qobject_cast<AppItem*>(obj);
+            if (item && item->id() == key) {
+                targetItem = item;
+                break;
+            }
+        }
+
+        if (!targetItem) {
+            // Create dynamic unpinned AppItem
+            QString title = wins.first().caption;
+            QString iconName = key;
+            QString exec = key;
+
+            // Search desktop files for real name & icon
+            QString desktopPath = "/usr/share/applications/" + key + ".desktop";
+            if (!QFile::exists(desktopPath)) {
+                desktopPath = QDir::homePath() + "/.local/share/applications/" + key + ".desktop";
+            }
+
+            if (QFile::exists(desktopPath)) {
+                QString dTitle, dIcon, dExec;
+                parseDesktopFile(desktopPath, dTitle, dIcon, dExec);
+                if (!dTitle.isEmpty()) title = dTitle;
+                if (!dIcon.isEmpty()) iconName = dIcon;
+            } else {
+                iconName = resolveSystemIcon(key);
+                if (title.isEmpty()) title = key;
+                if (!title.isEmpty()) title[0] = title[0].toUpper();
+            }
+
+            targetItem = new AppItem(key, title, iconName, exec, false, false, false, this);
+            m_apps.append(targetItem);
+            structureChanged = true;
+        }
+
+        QVariantList wList;
+        for (const auto &w : wins) {
+            QVariantMap wMap;
+            wMap["id"] = w.id;
+            wMap["title"] = w.caption.isEmpty() ? targetItem->title() : w.caption;
+            wMap["minimized"] = w.minimized;
+            wMap["active"] = w.active;
+            wList.append(wMap);
+        }
+        targetItem->setWindows(wList);
+    }
+
+    // Clean up unpinned apps with 0 windows
+    for (int i = m_apps.size() - 1; i >= 0; --i) {
+        auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+        if (item && !item->isPinned() && item->windowCount() == 0) {
+            m_apps.removeAt(i);
+            item->deleteLater();
+            structureChanged = true;
+        }
+    }
+
+    if (structureChanged) {
+        emit appsChanged();
+    }
+}
+
+void DockManager::activateWindow(const QString &windowId) {
+    QString script = QString(R"(
+        var clients = workspace.windowList();
+        for (var i = 0; i < clients.length; i++) {
+            var c = clients[i];
+            var id = c.internalId ? c.internalId.toString() : ("win_" + i);
+            if (id === "%1") {
+                c.minimized = false;
+                workspace.activeWindow = c;
+                break;
+            }
+        }
+    )").arg(windowId);
+    runKWinScript(script);
+}
+
+void DockManager::closeWindowById(const QString &windowId) {
+    QString script = QString(R"(
+        var clients = workspace.windowList();
+        for (var i = 0; i < clients.length; i++) {
+            var c = clients[i];
+            var id = c.internalId ? c.internalId.toString() : ("win_" + i);
+            if (id === "%1") {
+                c.closeWindow();
+                break;
+            }
+        }
+    )").arg(windowId);
+    runKWinScript(script);
+}
+
 void DockManager::launchOrToggleApp(const QString &id) {
     emit appLaunched(id);
 
-    QString query = getAppQuery(id);
-    
-    QString script = QString(R"(
-        var clients = workspace.windowList();
-        var queries = "%1".split("|");
-        var matched = null;
-        for (var i = 0; i < clients.length; i++) {
-            var c = clients[i];
-            if (!c.normalWindow) continue;
-            var name = (c.desktopFileName + " " + c.resourceClass + " " + c.resourceName + " " + c.caption).toLowerCase();
-            for (var q = 0; q < queries.length; q++) {
-                if (name.indexOf(queries[q]) !== -1) {
-                    matched = c;
-                    break;
-                }
-            }
-            if (matched) break;
-        }
-        if (matched) {
-            if (workspace.activeWindow === matched && !matched.minimized) {
-                matched.minimized = true;
-            } else {
-                matched.minimized = false;
-                workspace.activeWindow = matched;
-            }
-        }
-    )").arg(query);
-
-    bool isRunning = false;
+    // Find the app in m_apps
+    AppItem *targetApp = nullptr;
     for (QObject *obj : m_apps) {
         auto *item = qobject_cast<AppItem*>(obj);
-        if (item && item->id() == id && item->isRunning()) {
-            isRunning = true;
+        if (item && item->id() == id) {
+            targetApp = item;
             break;
         }
     }
 
-    if (isRunning) {
-        runKWinScript(script);
+    if (targetApp && targetApp->windowCount() > 0) {
+        // If app has windows open
+        if (targetApp->windowCount() == 1) {
+            // Single window toggle
+            QVariantMap win = targetApp->windows().first().toMap();
+            QString winId = win.value("id").toString();
+            bool isActive = win.value("active").toBool();
+            bool isMinimized = win.value("minimized").toBool();
+
+            if (isActive && !isMinimized) {
+                // Minimize active window
+                minimizeApp(id);
+            } else {
+                // Restore / focus window
+                activateWindow(winId);
+            }
+        } else {
+            // Multiple windows: activate the next/first window
+            QVariantMap win = targetApp->windows().first().toMap();
+            activateWindow(win.value("id").toString());
+        }
     } else {
+        // App is not running -> Launch new instance!
         launchNewInstance(id);
     }
 }
@@ -450,7 +665,6 @@ void DockManager::launchNewInstance(const QString &id) {
         auto *item = qobject_cast<AppItem*>(obj);
         if (item && item->id() == id) {
             launchCommand(item->execCommand());
-            item->setIsRunning(true);
             return;
         }
     }
@@ -535,7 +749,7 @@ void DockManager::initDefaultApps() {
     };
 
     for (const auto &item : defaultList) {
-        auto *app = new AppItem(item.id, item.title, item.icon, item.execCommand, item.dockBreaksBefore, false, this);
+        auto *app = new AppItem(item.id, item.title, item.icon, item.execCommand, item.dockBreaksBefore, false, true, this);
         m_apps.append(app);
     }
 
@@ -574,43 +788,25 @@ void DockManager::quitDock() {
 }
 
 void DockManager::refreshRunningStatus() {
-    QProcess process;
-    process.start("pgrep", QStringList() << "-a" << ".");
-    if (!process.waitForFinished(800)) return;
-
-    QString output = QString::fromUtf8(process.readAllStandardOutput()).toLower();
-
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
-        if (!item) continue;
-
-        QString id = item->id();
-        bool running = false;
-
-        if (id == "finder") {
-            running = output.contains("dolphin") || output.contains("nautilus") || output.contains("nemo");
-        } else if (id == "safari") {
-            running = output.contains("chrome") || output.contains("firefox") || output.contains("brave") || output.contains("chromium");
-        } else if (id == "terminal") {
-            running = output.contains("konsole") || output.contains("gnome-terminal") || output.contains("alacritty") || output.contains("kitty");
-        } else if (id == "vscode") {
-            running = output.contains("code");
-        } else if (id == "system-preferences") {
-            running = output.contains("systemsettings") || output.contains("gnome-control-center");
-        } else if (id == "calculator") {
-            running = output.contains("kcalc") || output.contains("gnome-calculator");
-        } else if (id == "music") {
-            running = output.contains("spotify") || output.contains("elisa") || output.contains("rhythmbox");
-        } else if (id == "mail") {
-            running = output.contains("thunderbird") || output.contains("kmail");
-        } else if (id == "notes") {
-            running = output.contains("kate") || output.contains("knotes") || output.contains("gedit");
-        } else if (id == "photos") {
-            running = output.contains("gwenview") || output.contains("eog") || output.contains("shotwell");
-        } else if (id == "appstore") {
-            running = output.contains("plasma-discover") || output.contains("discover") || output.contains("gnome-software");
+    // Query KWin window list
+    QString script = R"(
+        var list = [];
+        var clients = workspace.windowList();
+        for (var i = 0; i < clients.length; i++) {
+            var c = clients[i];
+            if (!c.normalWindow) continue;
+            list.push({
+                "id": c.internalId ? c.internalId.toString() : ("win_" + i),
+                "desktopFile": c.desktopFileName ? c.desktopFileName : "",
+                "resourceClass": c.resourceClass ? c.resourceClass : "",
+                "resourceName": c.resourceName ? c.resourceName : "",
+                "caption": c.caption ? c.caption : "",
+                "minimized": c.minimized ? true : false,
+                "active": (workspace.activeWindow === c),
+                "pid": c.pid ? c.pid : 0
+            });
         }
-
-        item->setIsRunning(running);
-    }
+        callDBus("org.kde.MacOSDock", "/WindowTracker", "org.kde.MacOSDock", "updateWindows", JSON.stringify(list));
+    )";
+    runKWinScript(script);
 }

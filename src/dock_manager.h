@@ -9,16 +9,19 @@
 #include <QUrl>
 #include <QDBusInterface>
 #include <QDBusReply>
+#include <QDBusConnection>
 #include <QTemporaryFile>
+#include <QVariantList>
 #include "app_item.h"
 
 class DockManager : public QObject {
     Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.kde.MacOSDock")
+
     Q_PROPERTY(QList<QObject*> apps READ apps NOTIFY appsChanged)
     Q_PROPERTY(bool isDarkTheme READ isDarkTheme WRITE setIsDarkTheme NOTIFY isDarkThemeChanged)
     Q_PROPERTY(double baseIconWidth READ baseIconWidth WRITE setBaseIconWidth NOTIFY baseIconWidthChanged)
     Q_PROPERTY(double maxMagnification READ maxMagnification WRITE setMaxMagnification NOTIFY maxMagnificationChanged)
-    Q_PROPERTY(bool isOnDesktop READ isOnDesktop NOTIFY isOnDesktopChanged)
     Q_PROPERTY(bool isMenuOpen READ isMenuOpen WRITE setIsMenuOpen NOTIFY isMenuOpenChanged)
 
 public:
@@ -29,7 +32,6 @@ public:
     bool isDarkTheme() const { return m_isDarkTheme; }
     double baseIconWidth() const { return m_baseIconWidth; }
     double maxMagnification() const { return m_maxMagnification; }
-    bool isOnDesktop() const { return m_isOnDesktop; }
     bool isMenuOpen() const { return m_isMenuOpen; }
 
     void setIsDarkTheme(bool isDark);
@@ -46,10 +48,12 @@ public:
     Q_INVOKABLE void launchNewInstance(const QString &id);
     Q_INVOKABLE void minimizeApp(const QString &id);
     Q_INVOKABLE void closeApp(const QString &id);
+    Q_INVOKABLE void activateWindow(const QString &windowId);
+    Q_INVOKABLE void closeWindowById(const QString &windowId);
+    Q_INVOKABLE void pinApp(const QString &id);
     Q_INVOKABLE void launchCommand(const QString &command);
     Q_INVOKABLE void quitDock();
     Q_INVOKABLE void refreshRunningStatus();
-    Q_INVOKABLE void checkDesktopState();
 
     // ── Customization & Management ──
     Q_INVOKABLE void moveApp(int fromIndex, int toIndex);
@@ -61,12 +65,14 @@ public:
     Q_INVOKABLE void toggleDividerBefore(const QString &id);
     Q_INVOKABLE void resetToDefaultApps();
 
+public Q_SLOTS:
+    void updateWindows(const QString &json);
+
 signals:
     void appsChanged();
     void isDarkThemeChanged();
     void baseIconWidthChanged();
     void maxMagnificationChanged();
-    void isOnDesktopChanged();
     void isMenuOpenChanged();
     void appLaunched(const QString &id);
 
@@ -78,6 +84,8 @@ private:
     QString parseDesktopFile(const QString &path, QString &title, QString &icon, QString &exec);
     QString resolveSystemIcon(const QString &iconName);
     QString getAppQuery(const QString &id);
+    void setupKWinWindowTracker();
+    void matchWindowsToApps(const QJsonArray &windowList);
     bool runKWinScript(const QString &scriptCode, QString *outResult = nullptr);
 
     QList<QObject*> m_apps;
@@ -85,7 +93,6 @@ private:
     QQuickWindow *m_window = nullptr;
     bool m_isDarkTheme = true;
     bool m_isAutoHidden = false;
-    bool m_isOnDesktop = true;
     bool m_isMenuOpen = false;
     double m_baseIconWidth = 57.6;
     double m_maxMagnification = 2.0;
