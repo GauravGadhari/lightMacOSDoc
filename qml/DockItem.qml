@@ -310,6 +310,15 @@ Item {
                     if (appData) dockManager.toggleDividerBefore(appData.id);
                 }
             }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
+                onTriggered: {
+                    dockManager.toggleAutostart();
+                }
+            }
         }
 
         MenuSeparator {}

@@ -763,6 +763,45 @@ void DockManager::setIsDarkTheme(bool isDark) {
     }
 }
 
+bool DockManager::isAutostartEnabled() const {
+    QString autostartFile = QDir::homePath() + "/.config/autostart/macos-dock.desktop";
+    return QFile::exists(autostartFile);
+}
+
+void DockManager::setAutostartEnabled(bool enabled) {
+    QString autostartDir = QDir::homePath() + "/.config/autostart";
+    QString autostartFile = autostartDir + "/macos-dock.desktop";
+
+    if (enabled) {
+        QDir().mkpath(autostartDir);
+        QFile file(autostartFile);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QString content = 
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                "Name=macOS Dock\n"
+                "Comment=Light macOS Dock for Linux (KDE Plasma / Wayland / X11)\n"
+                "Exec=/mnt/code/_Antigravity/General/macos-dock-qt6/run_dock.sh\n"
+                "Icon=/mnt/code/_Antigravity/General/macos-dock-qt6/assets/icons/launchpad/256.png\n"
+                "Terminal=false\n"
+                "StartupNotify=false\n"
+                "X-KDE-autostart-phase=2\n"
+                "X-GNOME-Autostart-enabled=true\n"
+                "Categories=Utility;\n";
+            file.write(content.toUtf8());
+            file.close();
+            file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner | QFileDevice::ReadGroup | QFileDevice::ReadOther);
+        }
+    } else {
+        QFile::remove(autostartFile);
+    }
+    emit autostartEnabledChanged();
+}
+
+void DockManager::toggleAutostart() {
+    setAutostartEnabled(!isAutostartEnabled());
+}
+
 void DockManager::setBaseIconWidth(double width) {
     if (m_baseIconWidth != width) {
         m_baseIconWidth = width;

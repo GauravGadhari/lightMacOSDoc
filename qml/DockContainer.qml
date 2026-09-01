@@ -270,6 +270,13 @@ Item {
             onTriggered: dockManager.resetToDefaultApps()
         }
 
+        MenuItem {
+            text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
+            onTriggered: {
+                dockManager.toggleAutostart();
+            }
+        }
+
         MenuSeparator {}
 
         MenuItem {
