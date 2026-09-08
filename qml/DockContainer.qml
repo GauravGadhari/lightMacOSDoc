@@ -19,115 +19,59 @@ Item {
         updateMaskTimer.restart();
     }
 
-    // Exact Svelte 5 tick_spring ODE solver from svelte/src/motion/spring.js (normalized to delta_time ~ 1.0)
-    function tickSpring(delta_time, last_val, cur_val, target_val, stiffness, damping, precision) {
+    // ────────────────────────────────────────────────────────────────
+    // Svelte 5 tick_spring ODE solver (spring.js)
+    // ────────────────────────────────────────────────────────────────
+    function tickSpring(dt, last_val, cur_val, target_val, stiffness, damping, precision) {
         var delta = target_val - cur_val;
-        var velocity = (cur_val - last_val) / delta_time;
-        var springForce = stiffness * delta;
-        var damperForce = damping * velocity;
-        var acceleration = springForce - damperForce; // inv_mass = 1
-        var d = (velocity + acceleration) * delta_time;
+        var velocity = (cur_val - last_val) / dt;
+        var d = (velocity + (stiffness * delta - damping * velocity)) * dt;
         if (Math.abs(d) < precision && Math.abs(delta) < precision) {
-            return target_val; // Settled cleanly
-        } else {
-            return cur_val + d;
+            return target_val;
         }
+        return cur_val + d;
     }
 
-    // Popmotion piecewise magnification curve from macos-web
-    function calcTargetWidth(distance) {
-        if (distance > root.distanceLimit) {
-            return root.baseWidth;
-        }
-        var norm = distance / root.distanceLimit;
+    // ────────────────────────────────────────────────────────────────
+    // Popmotion interpolate() magnification curve from macos-web
+    //
+    // distanceInput:  [-limit, -limit/1.25, -limit/2, 0, limit/2, limit/1.25, limit]
+    // widthOutput:    [base,   base*1.1,    base*1.414, base*2, base*1.414, base*1.1, base]
+    //
+    // We use absolute distance so only the right half matters:
+    //   [0            → base*2.0  ]
+    //   [limit/2      → base*1.414]
+    //   [limit/1.25   → base*1.1  ]
+    //   [limit        → base*1.0  ]
+    // ────────────────────────────────────────────────────────────────
+    function calcTargetWidth(absDist) {
+        var L = root.distanceLimit;
+        if (absDist >= L) return root.baseWidth;
+
+        var b = root.baseWidth;
+        // Keypoints (distance → scale factor)
+        var k0 = 0;              var s0 = 2.0;
+        var k1 = L / 2;          var s1 = 1.414;
+        var k2 = L / 1.25;       var s2 = 1.1;
+        var k3 = L;              var s3 = 1.0;
+
         var scale;
-        if (norm < 0.1667) {
-            scale = root.maxMagnification;
-        } else if (norm < 0.3333) {
-            var t = (norm - 0.1667) / 0.1666;
-            scale = root.maxMagnification - t * (root.maxMagnification - 1.833);
-        } else if (norm < 0.5) {
-            var t = (norm - 0.3333) / 0.1667;
-            scale = 1.833 - t * (1.833 - 1.5);
-        } else if (norm < 0.6667) {
-            var t = (norm - 0.5) / 0.1667;
-            scale = 1.5 - t * (1.5 - 1.167);
-        } else if (norm < 0.8333) {
-            var t = (norm - 0.6667) / 0.1666;
-            scale = 1.167 - t * (1.167 - 1.033);
+        if (absDist <= k1) {
+            var t = absDist / k1;
+            scale = s0 + t * (s1 - s0);    // 2.0 → 1.414
+        } else if (absDist <= k2) {
+            var t = (absDist - k1) / (k2 - k1);
+            scale = s1 + t * (s2 - s1);    // 1.414 → 1.1
         } else {
-            var t = (norm - 0.8333) / 0.1667;
-            scale = 1.033 - t * (1.033 - 1.0);
+            var t = (absDist - k2) / (k3 - k2);
+            scale = s2 + t * (s3 - s2);    // 1.1 → 1.0
         }
-        return root.baseWidth * scale;
+        return b * scale;
     }
 
-    // Calculate static resting reference centers for all icons.
-    // In genuine macOS dock physics, distance is measured relative to the resting shelf,
-    // so icon width expansion NEVER creates feedback jitter or spatial oscillation.
-    function getBaseReferenceCenters() {
-        var count = itemsRepeater.count;
-        var centers = [];
-        var totalBaseW = 0;
-        var widths = [];
-
-        for (var i = 0; i < count; ++i) {
-            var delegate = itemsRepeater.itemAt(i);
-            var hasDivider = (delegate && delegate.modelData && delegate.modelData.dockBreaksBefore);
-            var itemW = root.baseWidth + (hasDivider ? 19 : 0);
-            widths.push({ w: itemW, dividerOffset: hasDivider ? 19 : 0 });
-            totalBaseW += itemW;
-            if (i < count - 1) totalBaseW += 5; // spacing
-        }
-
-        // Horizontal position of itemsRow inside root (DockContainer)
-        var startX = (root.width - totalBaseW) / 2;
-        var currentX = startX;
-
-        for (var j = 0; j < count; ++j) {
-            var itemInfo = widths[j];
-            var center = currentX + itemInfo.dividerOffset + (root.baseWidth / 2);
-            centers.push(center);
-            currentX += itemInfo.w + 5;
-        }
-
-        return centers;
-    }
-
-    // Update stable magnification targets
-    function updateTargets() {
-        var count = itemsRepeater.count;
-        if (count === 0) return;
-
-        if (root.dockMouseX === null) {
-            for (var i = 0; i < count; ++i) {
-                var del = itemsRepeater.itemAt(i);
-                if (del && del.dockItemInstance) {
-                    del.dockItemInstance.targetWidth = root.baseWidth;
-                }
-            }
-            return;
-        }
-
-        // Map mouseX relative to root coordinate space
-        var mouseInRoot = root.dockMouseX - (root.mapToItem(null, 0, 0).x);
-        var centers = getBaseReferenceCenters();
-
-        for (var k = 0; k < count; ++k) {
-            var delegate = itemsRepeater.itemAt(k);
-            if (!delegate) continue;
-            var dockItem = delegate.dockItemInstance;
-            if (!dockItem) continue;
-
-            var refX = centers[k];
-            var dist = Math.abs(mouseInRoot - refX);
-            dockItem.targetWidth = root.calcTargetWidth(dist);
-        }
-    }
-
-    onDockMouseXChanged: updateTargets()
-
-    // 120Hz/60Hz Animation Frame Timer for Spring Physics
+    // ────────────────────────────────────────────────────────────────
+    // 120Hz/60Hz Physics Ticker
+    // ────────────────────────────────────────────────────────────────
     FrameAnimation {
         id: physicsTicker
         running: true
@@ -146,11 +90,16 @@ Item {
                 var dockItem = delegate.dockItemInstance;
                 if (!dockItem) continue;
 
-                var targetW = dockItem.targetWidth;
+                // ── LIVE distance, exactly like Svelte's getBoundingClientRect() ──
+                var targetW = root.baseWidth;
+                if (root.dockMouseX !== null) {
+                    // Use the IMAGE center (live), same as Svelte's image_el.getBoundingClientRect()
+                    var imgCenter = dockItem.mapToItem(null, dockItem.width / 2, 0);
+                    var dist = Math.abs(root.dockMouseX - imgCenter.x);
+                    targetW = root.calcTargetWidth(dist);
+                }
 
-                // Tick ODE Spring smoothly towards invariant static target
                 var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
-
                 dockItem.lastWidth = dockItem.currentWidth;
                 dockItem.currentWidth = nextW;
                 dockItem.width = nextW;
@@ -158,7 +107,9 @@ Item {
         }
     }
 
-    // Dynamic Input Mask Updating (Restricts pointer capture to ONLY the dock pill!)
+    // ────────────────────────────────────────────────────────────────
+    // Mask Timer
+    // ────────────────────────────────────────────────────────────────
     Timer {
         id: updateMaskTimer
         interval: 100
@@ -173,39 +124,70 @@ Item {
         dockManager.updateMask(pt.x, pt.y, dockPill.width, dockPill.height);
     }
 
-    onWidthChanged: {
-        updateMaskTimer.restart();
-        updateTargets();
-    }
-    Component.onCompleted: {
-        updateMaskTimer.restart();
-        updateTargets();
-    }
+    onWidthChanged: updateMaskTimer.restart()
+    Component.onCompleted: updateMaskTimer.restart()
 
     // Extra padding on sides so magnified edge icons aren't clipped
     width: dockPill.width + 200
     height: 220
 
-    // Master Full-Width Hover Zone: Constant 220px height, immune to icon resizing
+    // ────────────────────────────────────────────────────────────────
+    // LAYER 1: Full-Width Magnification Tracker (entire 220px height)
+    //
+    // This ONLY tracks dockMouseX for the magnification spring.
+    // It does NOT control isMouseInside (auto-hide).
+    // ────────────────────────────────────────────────────────────────
     MouseArea {
-        id: containerMouseArea
+        id: magnificationTracker
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.RightButton
+        acceptedButtons: Qt.NoButton
         propagateComposedEvents: true
         z: 0
 
         onPositionChanged: (mouse) => {
             var pt = mapToItem(null, mouse.x, mouse.y);
             root.dockMouseX = pt.x;
-            root.isMouseInside = true;
-            root.updateTargets();
         }
 
         onExited: {
             root.dockMouseX = null;
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // LAYER 2: Dock Pill Hover Zone (pill + magnified icon overflow)
+    //
+    // This controls isMouseInside for auto-hide.
+    // Height = pill(68) + max magnified overflow(~60) + padding(22) ≈ 150px
+    // Anchored to the bottom, so it covers the pill and magnified icons
+    // but NOT the empty space above — just like Svelte's dock-el.
+    // ────────────────────────────────────────────────────────────────
+    MouseArea {
+        id: pillHoverZone
+        anchors.bottom: parent.bottom
+        anchors.left: dockPill.left
+        anchors.right: dockPill.right
+        anchors.leftMargin: -20
+        anchors.rightMargin: -20
+        height: 150
+        hoverEnabled: true
+        acceptedButtons: Qt.RightButton
+        propagateComposedEvents: true
+        z: 1
+
+        onEntered: {
+            root.isMouseInside = true;
+        }
+
+        onExited: {
             root.isMouseInside = false;
-            root.updateTargets();
+        }
+
+        onPositionChanged: (mouse) => {
+            var pt = mapToItem(null, mouse.x, mouse.y);
+            root.dockMouseX = pt.x;
+            root.isMouseInside = true;
         }
 
         onClicked: (mouse) => {
@@ -237,7 +219,7 @@ Item {
         height: 68
         radius: 18
         z: 2
-        clip: false  // Don't clip magnified icons!
+        clip: false
 
         color: dockManager.isDarkTheme 
             ? Qt.rgba(0.12, 0.12, 0.15, 0.60) 
@@ -259,7 +241,7 @@ Item {
             color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.25) : Qt.rgba(1, 1, 1, 0.65)
         }
 
-        // Drag & Drop Area: Drop files, .desktop apps, or URLs onto the dock to add them!
+        // Drag & Drop Area
         DropArea {
             anchors.fill: parent
             z: 3
@@ -277,7 +259,7 @@ Item {
             }
         }
 
-        // Row of Dock Items (Bottom-anchored to dock shelf)
+        // Row of Dock Items
         Row {
             id: itemsRow
             anchors.bottom: parent.bottom
@@ -285,7 +267,7 @@ Item {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: 5
             z: 10
-            clip: false  // Don't clip magnified icons!
+            clip: false
             onWidthChanged: updateMaskTimer.restart()
 
             Repeater {
@@ -296,17 +278,15 @@ Item {
                     id: delegateRow
                     spacing: 5
                     anchors.bottom: parent ? parent.bottom : undefined
-                    clip: false  // Don't clip magnified icons!
+                    clip: false
 
                     property alias dockItemInstance: dockItem
 
-                    // Divider before item if configured
                     DockDivider {
                         visible: modelData.dockBreaksBefore
                         anchors.bottom: parent.bottom
                     }
 
-                    // Dock Item
                     DockItem {
                         id: dockItem
                         appData: modelData
@@ -338,9 +318,7 @@ Item {
 
         MenuItem {
             text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
-            onTriggered: {
-                dockManager.toggleAutostart();
-            }
+            onTriggered: dockManager.toggleAutostart()
         }
 
         MenuSeparator {}

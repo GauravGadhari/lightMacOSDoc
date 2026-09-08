@@ -8,20 +8,22 @@ Item {
     property int itemIndex: 0
     property var dockContainerRef: null
     
-    // Exact Svelte spring values
+    // Spring state (driven by DockContainer's physicsTicker)
     property real lastWidth: 57.6
     property real currentWidth: 57.6
-    property real targetWidth: 57.6
 
-    // Immune to dynamic height changes: hovered if dock mouse X is over this item's horizontal span
-    property bool isHovered: (dockContainerRef && dockContainerRef.dockMouseX !== null) && 
-                             Math.abs(dockContainerRef.dockMouseX - (mapToItem(null, width / 2, 0).x)) < (width / 2)
+    // Hovered = dockMouseX is within this item's horizontal span
+    property bool isHovered: {
+        if (!dockContainerRef || dockContainerRef.dockMouseX === null) return false;
+        var center = mapToItem(null, width / 2, 0).x;
+        return Math.abs(dockContainerRef.dockMouseX - center) < (width / 2);
+    }
     property bool isDragging: false
     property bool isMarkedForRemoval: false
 
     width: currentWidth
     height: currentWidth
-    clip: false  // Never clip magnified icons
+    clip: false
 
     // ── macOS Dock Bounce Animation ──
     SequentialAnimation {
@@ -30,29 +32,21 @@ Item {
         loops: 3
 
         NumberAnimation {
-            target: iconVisual
-            property: "y"
-            from: 0
-            to: -35
-            duration: 200
+            target: iconVisual; property: "y"
+            from: 0; to: -35; duration: 200
             easing.type: Easing.OutQuad
         }
         NumberAnimation {
-            target: iconVisual
-            property: "y"
-            from: -35
-            to: 0
-            duration: 250
+            target: iconVisual; property: "y"
+            from: -35; to: 0; duration: 250
             easing.type: Easing.OutBounce
         }
         PauseAnimation { duration: 80 }
     }
 
-    function triggerBounce() {
-        bounceAnim.restart();
-    }
+    function triggerBounce() { bounceAnim.restart(); }
 
-    // App Tooltip (Frosted glass pill hovering directly above icon)
+    // Tooltip
     Tooltip {
         id: tooltip
         anchors.horizontalCenter: parent.horizontalCenter
@@ -85,7 +79,7 @@ Item {
             asynchronous: true
         }
 
-        // Notification Badge (Red circular pill)
+        // Notification Badge
         Rectangle {
             id: badge
             visible: appData ? (appData.badgeCount > 0) : false
@@ -111,21 +105,16 @@ Item {
         }
     }
 
-    // Running Indicator Dot (4px circular dot placed below the icon)
+    // Running Indicator Dot
     Rectangle {
         id: runningDot
-        width: 4
-        height: 4
-        radius: 2
+        width: 4; height: 4; radius: 2
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.bottom
         anchors.topMargin: 2
         color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.85) : Qt.rgba(0.1, 0.1, 0.1, 0.85)
         opacity: (appData && appData.isRunning && !root.isDragging) ? 1.0 : 0.0
-
-        Behavior on opacity {
-            NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
-        }
+        Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.OutQuad } }
     }
 
     // Mouse Interaction & Drag-to-Rearrange / Remove
@@ -149,6 +138,7 @@ Item {
         }
 
         onPositionChanged: (mouse) => {
+            // Forward mouse X to container for magnification
             if (dockContainerRef) {
                 var pt = mapToItem(null, mouse.x, mouse.y);
                 dockContainerRef.dockMouseX = pt.x;
@@ -166,7 +156,6 @@ Item {
 
                 if (dragTriggered) {
                     root.isMarkedForRemoval = (mouse.y < -70);
-
                     if (!root.isMarkedForRemoval) {
                         if (dx > root.width * 0.75) {
                             dockManager.moveApp(root.itemIndex, root.itemIndex + 1);
@@ -191,9 +180,7 @@ Item {
                     dragTriggered = false;
                 } else {
                     triggerBounce();
-                    if (appData) {
-                        dockManager.launchOrToggleApp(appData.id);
-                    }
+                    if (appData) dockManager.launchOrToggleApp(appData.id);
                 }
             }
         }
@@ -235,7 +222,7 @@ Item {
             }
         }
 
-        // Multi-Window Submenu when app has multiple windows open
+        // Multi-Window Submenu
         Menu {
             title: "Open Windows (" + (appData ? appData.windowCount : 0) + ")"
             visible: appData ? (appData.windowCount > 1) : false
@@ -244,9 +231,7 @@ Item {
                 model: (appData && appData.windows) ? appData.windows : []
                 MenuItem {
                     text: (modelData.active ? "● " : "  ") + (modelData.title ? (modelData.title.length > 35 ? modelData.title.substring(0, 32) + "..." : modelData.title) : "Window")
-                    onTriggered: {
-                        dockManager.activateWindow(modelData.id);
-                    }
+                    onTriggered: dockManager.activateWindow(modelData.id)
                 }
             }
         }
@@ -254,17 +239,13 @@ Item {
         MenuItem {
             visible: appData ? appData.isRunning : false
             text: "Minimize"
-            onTriggered: {
-                if (appData) dockManager.minimizeApp(appData.id);
-            }
+            onTriggered: { if (appData) dockManager.minimizeApp(appData.id); }
         }
 
         MenuItem {
             visible: appData ? appData.isRunning : false
             text: "Quit " + (appData ? appData.title : "")
-            onTriggered: {
-                if (appData) dockManager.closeApp(appData.id);
-            }
+            onTriggered: { if (appData) dockManager.closeApp(appData.id); }
         }
 
         MenuSeparator {}
@@ -272,54 +253,40 @@ Item {
         Menu {
             title: "Options"
 
-            // Keep in Dock (for dynamic unpinned running apps)
             MenuItem {
                 visible: appData ? !appData.isPinned : false
                 text: "Keep in Dock"
-                onTriggered: {
-                    if (appData) dockManager.pinApp(appData.id);
-                }
+                onTriggered: { if (appData) dockManager.pinApp(appData.id); }
             }
 
-            // Remove from Dock (for pinned apps)
             MenuItem {
                 visible: appData ? appData.isPinned : true
                 text: "Remove from Dock"
-                onTriggered: {
-                    if (appData) dockManager.removeAppById(appData.id);
-                }
+                onTriggered: { if (appData) dockManager.removeAppById(appData.id); }
             }
 
             MenuItem {
                 text: "Move Left"
                 enabled: root.itemIndex > 0
-                onTriggered: {
-                    dockManager.moveApp(root.itemIndex, root.itemIndex - 1);
-                }
+                onTriggered: dockManager.moveApp(root.itemIndex, root.itemIndex - 1)
             }
 
             MenuItem {
                 text: "Move Right"
                 enabled: root.itemIndex < (dockManager.apps.length - 1)
-                onTriggered: {
-                    dockManager.moveApp(root.itemIndex, root.itemIndex + 1);
-                }
+                onTriggered: dockManager.moveApp(root.itemIndex, root.itemIndex + 1)
             }
 
             MenuItem {
                 text: (appData && appData.dockBreaksBefore) ? "Remove Divider Before" : "Add Divider Before"
-                onTriggered: {
-                    if (appData) dockManager.toggleDividerBefore(appData.id);
-                }
+                onTriggered: { if (appData) dockManager.toggleDividerBefore(appData.id); }
             }
 
             MenuSeparator {}
 
             MenuItem {
                 text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
-                onTriggered: {
-                    dockManager.toggleAutostart();
-                }
+                onTriggered: dockManager.toggleAutostart()
             }
         }
 
