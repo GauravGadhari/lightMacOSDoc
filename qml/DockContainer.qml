@@ -69,7 +69,6 @@ Item {
 
         onTriggered: {
             var dtSec = (frameTime > 0.001 && frameTime < 0.05) ? frameTime : 0.016;
-            // Normalize delta_time to ~1.0 at 60fps (exact macos-web ODE solver time scale)
             var delta_time = Math.min(dtSec * 1000.0, 42.0) * 0.06;
             if (delta_time <= 0.01) delta_time = 1.0;
 
@@ -122,6 +121,33 @@ Item {
     width: dockPill.width + 200
     height: 220
 
+    // Master Full-Width Hover Zone: Constant 220px height, immune to icon resizing
+    MouseArea {
+        id: containerMouseArea
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.RightButton
+        propagateComposedEvents: true
+        z: 0
+
+        onPositionChanged: (mouse) => {
+            var pt = mapToItem(null, mouse.x, mouse.y);
+            root.dockMouseX = pt.x;
+            root.isMouseInside = true;
+        }
+
+        onExited: {
+            root.dockMouseX = null;
+            root.isMouseInside = false;
+        }
+
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.RightButton) {
+                pillContextMenu.popup();
+            }
+        }
+    }
+
     // Outer Ambient Shadow
     Rectangle {
         id: shadowGlow
@@ -131,7 +157,7 @@ Item {
         height: dockPill.height + 6
         radius: 20
         color: Qt.rgba(0, 0, 0, 0.32)
-        z: 0
+        z: 1
     }
 
     // Frosted Glass Dock Container Pill
@@ -143,7 +169,7 @@ Item {
         width: itemsRow.width + 18
         height: 68
         radius: 18
-        z: 1
+        z: 2
         clip: false  // Don't clip magnified icons!
 
         color: dockManager.isDarkTheme 
@@ -166,37 +192,10 @@ Item {
             color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.25) : Qt.rgba(1, 1, 1, 0.65)
         }
 
-        // Full Interactive Mouse Hover Zone
-        MouseArea {
-            id: containerMouseArea
-            anchors.fill: parent
-            anchors.topMargin: -140
-            hoverEnabled: true
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
-            propagateComposedEvents: true
-
-            onPositionChanged: (mouse) => {
-                var pt = mapToItem(null, mouse.x, mouse.y);
-                root.dockMouseX = pt.x;
-                root.isMouseInside = true;
-            }
-
-            onExited: {
-                root.dockMouseX = null;
-                root.isMouseInside = false;
-            }
-
-            onClicked: (mouse) => {
-                if (mouse.button === Qt.RightButton) {
-                    pillContextMenu.popup();
-                }
-            }
-        }
-
         // Drag & Drop Area: Drop files, .desktop apps, or URLs onto the dock to add them!
         DropArea {
             anchors.fill: parent
-            z: 0
+            z: 3
             onEntered: (drag) => {
                 root.isMouseInside = true;
             }

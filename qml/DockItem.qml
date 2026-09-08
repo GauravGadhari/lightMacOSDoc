@@ -11,7 +11,10 @@ Item {
     // Exact Svelte spring values
     property real lastWidth: 57.6
     property real currentWidth: 57.6
-    property bool isHovered: mouseArea.containsMouse
+
+    // Immune to dynamic height changes: hovered if dock mouse X is over this item's horizontal span
+    property bool isHovered: (dockContainerRef && dockContainerRef.dockMouseX !== null) && 
+                             Math.abs(dockContainerRef.dockMouseX - (mapToItem(null, width / 2, 0).x)) < (width / 2)
     property bool isDragging: false
     property bool isMarkedForRemoval: false
 
@@ -125,12 +128,17 @@ Item {
     }
 
     // Mouse Interaction & Drag-to-Rearrange / Remove
+    // Tall fixed height so clicking and hovering near icon top never falls through when icon resizes
     MouseArea {
         id: mouseArea
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 220
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         cursorShape: root.isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+        propagateComposedEvents: true
 
         property real pressX: 0
         property real pressY: 0
