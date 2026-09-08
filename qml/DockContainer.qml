@@ -62,6 +62,29 @@ Item {
         return root.baseWidth * scale;
     }
 
+    // Update stable magnification targets only when mouse moves
+    function updateTargets() {
+        var count = itemsRepeater.count;
+        if (count === 0) return;
+
+        for (var i = 0; i < count; ++i) {
+            var delegate = itemsRepeater.itemAt(i);
+            if (!delegate) continue;
+            var dockItem = delegate.dockItemInstance;
+            if (!dockItem) continue;
+
+            if (root.dockMouseX !== null) {
+                var itemCenterPt = dockItem.mapToItem(null, dockItem.width / 2, 0);
+                var dist = Math.abs(root.dockMouseX - itemCenterPt.x);
+                dockItem.targetWidth = root.calcTargetWidth(dist);
+            } else {
+                dockItem.targetWidth = root.baseWidth;
+            }
+        }
+    }
+
+    onDockMouseXChanged: updateTargets()
+
     // 120Hz/60Hz Animation Frame Timer for Spring Physics
     FrameAnimation {
         id: physicsTicker
@@ -81,15 +104,9 @@ Item {
                 var dockItem = delegate.dockItemInstance;
                 if (!dockItem) continue;
 
-                var targetW = root.baseWidth;
+                var targetW = dockItem.targetWidth;
 
-                if (root.dockMouseX !== null) {
-                    var itemCenterPt = dockItem.mapToItem(null, dockItem.width / 2, 0);
-                    var dist = Math.abs(root.dockMouseX - itemCenterPt.x);
-                    targetW = root.calcTargetWidth(dist);
-                }
-
-                // Tick ODE Spring with exact Svelte 5 values
+                // Tick ODE Spring smoothly towards fixed target
                 var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
 
                 dockItem.lastWidth = dockItem.currentWidth;
@@ -134,11 +151,13 @@ Item {
             var pt = mapToItem(null, mouse.x, mouse.y);
             root.dockMouseX = pt.x;
             root.isMouseInside = true;
+            root.updateTargets();
         }
 
         onExited: {
             root.dockMouseX = null;
             root.isMouseInside = false;
+            root.updateTargets();
         }
 
         onClicked: (mouse) => {

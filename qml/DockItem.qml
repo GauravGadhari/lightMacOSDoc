@@ -11,6 +11,7 @@ Item {
     // Exact Svelte spring values
     property real lastWidth: 57.6
     property real currentWidth: 57.6
+    property real targetWidth: 57.6
 
     // Immune to dynamic height changes: hovered if dock mouse X is over this item's horizontal span
     property bool isHovered: (dockContainerRef && dockContainerRef.dockMouseX !== null) && 
