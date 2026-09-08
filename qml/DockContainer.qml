@@ -62,24 +62,66 @@ Item {
         return root.baseWidth * scale;
     }
 
-    // Update stable magnification targets only when mouse moves
+    // Calculate static resting reference centers for all icons.
+    // In genuine macOS dock physics, distance is measured relative to the resting shelf,
+    // so icon width expansion NEVER creates feedback jitter or spatial oscillation.
+    function getBaseReferenceCenters() {
+        var count = itemsRepeater.count;
+        var centers = [];
+        var totalBaseW = 0;
+        var widths = [];
+
+        for (var i = 0; i < count; ++i) {
+            var delegate = itemsRepeater.itemAt(i);
+            var hasDivider = (delegate && delegate.modelData && delegate.modelData.dockBreaksBefore);
+            var itemW = root.baseWidth + (hasDivider ? 19 : 0);
+            widths.push({ w: itemW, dividerOffset: hasDivider ? 19 : 0 });
+            totalBaseW += itemW;
+            if (i < count - 1) totalBaseW += 5; // spacing
+        }
+
+        // Horizontal position of itemsRow inside root (DockContainer)
+        var startX = (root.width - totalBaseW) / 2;
+        var currentX = startX;
+
+        for (var j = 0; j < count; ++j) {
+            var itemInfo = widths[j];
+            var center = currentX + itemInfo.dividerOffset + (root.baseWidth / 2);
+            centers.push(center);
+            currentX += itemInfo.w + 5;
+        }
+
+        return centers;
+    }
+
+    // Update stable magnification targets
     function updateTargets() {
         var count = itemsRepeater.count;
         if (count === 0) return;
 
-        for (var i = 0; i < count; ++i) {
-            var delegate = itemsRepeater.itemAt(i);
+        if (root.dockMouseX === null) {
+            for (var i = 0; i < count; ++i) {
+                var del = itemsRepeater.itemAt(i);
+                if (del && del.dockItemInstance) {
+                    del.dockItemInstance.targetWidth = root.baseWidth;
+                }
+            }
+            return;
+        }
+
+        // Map mouseX relative to root coordinate space
+        var mouseInRoot = root.dockMouseX - (root.mapToItem(null, 0, 0).x);
+        var centers = getBaseReferenceCenters();
+
+        for (var k = 0; k < count; ++k) {
+            var delegate = itemsRepeater.itemAt(k);
             if (!delegate) continue;
             var dockItem = delegate.dockItemInstance;
             if (!dockItem) continue;
 
-            if (root.dockMouseX !== null) {
-                var itemCenterPt = dockItem.mapToItem(null, dockItem.width / 2, 0);
-                var dist = Math.abs(root.dockMouseX - itemCenterPt.x);
-                dockItem.targetWidth = root.calcTargetWidth(dist);
-            } else {
-                dockItem.targetWidth = root.baseWidth;
-            }
+            var refX = centers[k];
+            var dist = Math.abs(mouseInRoot - refX);
+            dockItem.targetWidth = root.calcTargetWidth(dist);
         }
     }
 
@@ -106,7 +148,7 @@ Item {
 
                 var targetW = dockItem.targetWidth;
 
-                // Tick ODE Spring smoothly towards fixed target
+                // Tick ODE Spring smoothly towards invariant static target
                 var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
 
                 dockItem.lastWidth = dockItem.currentWidth;
@@ -131,8 +173,14 @@ Item {
         dockManager.updateMask(pt.x, pt.y, dockPill.width, dockPill.height);
     }
 
-    onWidthChanged: updateMaskTimer.restart()
-    Component.onCompleted: updateMaskTimer.restart()
+    onWidthChanged: {
+        updateMaskTimer.restart();
+        updateTargets();
+    }
+    Component.onCompleted: {
+        updateMaskTimer.restart();
+        updateTargets();
+    }
 
     // Extra padding on sides so magnified edge icons aren't clipped
     width: dockPill.width + 200
