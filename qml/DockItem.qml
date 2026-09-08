@@ -128,17 +128,12 @@ Item {
     }
 
     // Mouse Interaction & Drag-to-Rearrange / Remove
-    // Tall fixed height so clicking and hovering near icon top never falls through when icon resizes
     MouseArea {
         id: mouseArea
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: 220
+        anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         cursorShape: root.isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-        propagateComposedEvents: true
 
         property real pressX: 0
         property real pressY: 0
@@ -244,16 +239,14 @@ Item {
             title: "Open Windows (" + (appData ? appData.windowCount : 0) + ")"
             visible: appData ? (appData.windowCount > 1) : false
 
-            Instantiator {
+            Repeater {
                 model: (appData && appData.windows) ? appData.windows : []
-                delegate: MenuItem {
+                MenuItem {
                     text: (modelData.active ? "● " : "  ") + (modelData.title ? (modelData.title.length > 35 ? modelData.title.substring(0, 32) + "..." : modelData.title) : "Window")
                     onTriggered: {
                         dockManager.activateWindow(modelData.id);
                     }
                 }
-                onObjectAdded: (index, object) => parent.insertItem(index, object)
-                onObjectRemoved: (index, object) => parent.removeItem(object)
             }
         }
 
