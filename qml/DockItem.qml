@@ -110,17 +110,17 @@ Item {
     Connections {
         target: appData ? appData : null
         function onWindowCountChanged() {
-            if (appData && appData.windowCount > 0 && isLaunching) {
+            if (appData && appData.windowCount > 0) {
                 stopContinuousJump();
             }
         }
         function onWindowsChanged() {
-            if (appData && appData.windowCount > 0 && isLaunching) {
+            if (appData && appData.windowCount > 0) {
                 stopContinuousJump();
             }
         }
         function onIsRunningChanged() {
-            if (appData && appData.isRunning && isLaunching) {
+            if (appData && appData.isRunning) {
                 stopContinuousJump();
             }
         }
@@ -300,11 +300,6 @@ Item {
                     dragTriggered = false;
                 } else {
                     if (appData) {
-                        if (appData.isRunning && appData.windowCount > 0) {
-                            jumpOnce();
-                        } else {
-                            startContinuousJump();
-                        }
                         dockManager.launchOrToggleApp(appData.id);
                     }
                 }
@@ -381,11 +376,6 @@ Item {
             onTriggered: {
                 dockManager.dismissAllMenus();
                 if (appData) {
-                    if (appData.isRunning && appData.windowCount > 0) {
-                        jumpOnce();
-                    } else {
-                        startContinuousJump();
-                    }
                     dockManager.launchOrToggleApp(appData.id);
                 }
             }

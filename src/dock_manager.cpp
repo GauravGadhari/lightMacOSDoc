@@ -30,10 +30,10 @@ DockManager::DockManager(QObject *parent) : QObject(parent) {
     // Query windows shortly after startup to immediately populate running status & dots
     QTimer::singleShot(400, this, &DockManager::refreshRunningStatus);
 
-    // Health check timer to verify KWin tracker is alive (e.g. across KWin restarts)
+    // Health check timer to verify KWin tracker is alive
     m_pollTimer = new QTimer(this);
     connect(m_pollTimer, &QTimer::timeout, this, &DockManager::checkTrackerHealth);
-    m_pollTimer->start(4000);
+    m_pollTimer->start(2000);
 }
 
 DockManager::~DockManager() {
@@ -399,21 +399,21 @@ void DockManager::addAppFromText(const QString &text) {
 }
 
 QString DockManager::getAppQuery(const QString &id) {
-    if (id == "finder") return "dolphin|nautilus|nemo";
-    if (id == "safari") return "chrome|firefox|brave|chromium";
+    if (id == "finder") return "dolphin|nautilus|nemo|thunar";
+    if (id == "safari") return "chrome|firefox|brave|chromium|edge";
     if (id == "messages") return "whatsapp";
-    if (id == "terminal") return "konsole|terminal|alacritty|kitty";
+    if (id == "terminal") return "konsole|terminal|alacritty|kitty|wezterm|tilix|foot|xterm";
     if (id == "antigravity") return "antigravity";
-    if (id == "system-preferences") return "systemsettings|control-center";
-    if (id == "calculator") return "kcalc|calculator";
-    if (id == "music") return "spotify|elisa|rhythmbox";
+    if (id == "system-preferences") return "systemsettings|control-center|settings";
+    if (id == "calculator") return "kcalc|calculator|galculator";
+    if (id == "music") return "spotify|elisa|rhythmbox|clementine|audacious";
     if (id == "mail") return "thunderbird|kmail|mail.google.com|gmail";
     if (id == "maps") return "google maps|maps.google.com|maps";
     if (id == "contacts") return "kaddressbook|gnome-contacts|contacts.google.com|contacts";
-    if (id == "notes") return "kate|knotes|gedit";
-    if (id == "photos") return "gwenview|eog|shotwell";
-    if (id == "appstore") return "plasma-discover|discover";
-    if (id == "tv") return "sonyliv|sony liv|vlc";
+    if (id == "notes") return "kate|knotes|gedit|xed";
+    if (id == "photos") return "gwenview|eog|shotwell|loupe|ristretto";
+    if (id == "appstore") return "plasma-discover|discover|software";
+    if (id == "tv") return "sonyliv|sony liv|vlc|mpv";
     if (id == "spectacle" || id == "org.kde.spectacle") return "spectacle";
     return id;
 }
@@ -472,9 +472,12 @@ void DockManager::setupKWinWindowTracker() {
 
     QString scriptCode = QString(R"(
         var dockPid = %1;
+        var syncTimer = null;
+        var retryTimer = null;
 
         function isIgnored(c) {
-            if (!c || !c.normalWindow) return true;
+            if (!c) return true;
+            if (!c.normalWindow && !c.dialog) return true;
             if (c.pid && c.pid === dockPid) return true;
             var rClass = (c.resourceClass || "").toLowerCase();
             var rName = (c.resourceName || "").toLowerCase();
@@ -491,17 +494,19 @@ void DockManager::setupKWinWindowTracker() {
                 var clients = workspace.windowList();
                 for (var i = 0; i < clients.length; i++) {
                     var c = clients[i];
-                    if (isIgnored(c)) continue;
-                    list.push({
-                        "id": c.internalId ? c.internalId.toString() : ("win_" + i),
-                        "desktopFile": c.desktopFileName ? c.desktopFileName : "",
-                        "resourceClass": c.resourceClass ? c.resourceClass : "",
-                        "resourceName": c.resourceName ? c.resourceName : "",
-                        "caption": c.caption ? c.caption : "",
-                        "minimized": c.minimized ? true : false,
-                        "active": (workspace.activeWindow === c),
-                        "pid": c.pid ? c.pid : 0
-                    });
+                    try {
+                        if (isIgnored(c)) continue;
+                        list.push({
+                            "id": c.internalId ? c.internalId.toString() : ("win_" + i),
+                            "desktopFile": c.desktopFileName ? c.desktopFileName : "",
+                            "resourceClass": c.resourceClass ? c.resourceClass : "",
+                            "resourceName": c.resourceName ? c.resourceName : "",
+                            "caption": c.caption ? c.caption : "",
+                            "minimized": c.minimized ? true : false,
+                            "active": (workspace.activeWindow === c),
+                            "pid": c.pid ? c.pid : 0
+                        });
+                    } catch(innerErr) {}
                 }
                 callDBus("org.kde.MacOSDock", "/WindowTracker", "org.kde.MacOSDock", "updateWindows", JSON.stringify(list));
             } catch (err) {
@@ -510,11 +515,15 @@ void DockManager::setupKWinWindowTracker() {
         }
 
         function hookWindow(c) {
-            if (isIgnored(c)) return;
+            if (!c) return;
             try {
                 c.minimizedChanged.connect(sendUpdate);
                 c.captionChanged.connect(sendUpdate);
                 c.activeChanged.connect(sendUpdate);
+                if (c.desktopFileNameChanged) c.desktopFileNameChanged.connect(sendUpdate);
+                if (c.windowClassChanged) c.windowClassChanged.connect(sendUpdate);
+                if (c.readyForPaintingChanged) c.readyForPaintingChanged.connect(sendUpdate);
+                if (c.closed) c.closed.connect(sendUpdate);
             } catch(e) {}
         }
 
@@ -522,14 +531,10 @@ void DockManager::setupKWinWindowTracker() {
             workspace.windowAdded.connect(function(c) {
                 hookWindow(c);
                 sendUpdate();
+                if (retryTimer) retryTimer.start(250);
             });
             workspace.windowRemoved.connect(sendUpdate);
 
-            // Plasma 6 standard signal
-            if (workspace.activeWindowChanged) {
-                workspace.activeWindowChanged.connect(sendUpdate);
-            }
-            // Plasma 5 backward compatibility
             if (workspace.windowActivated) {
                 workspace.windowActivated.connect(sendUpdate);
             }
@@ -540,11 +545,17 @@ void DockManager::setupKWinWindowTracker() {
                 hookWindow(initialWindows[j]);
             }
 
-            // Internal compositor timer to guarantee 100% synchronization without IPC leaks
-            var syncTimer = new QTimer();
+            // Internal compositor timer to guarantee 100% synchronization
+            syncTimer = new QTimer();
             syncTimer.interval = 1000;
             syncTimer.timeout.connect(sendUpdate);
             syncTimer.start();
+
+            // Delayed retry timer for newly opened windows where Wayland sets props 150-250ms later
+            retryTimer = new QTimer();
+            retryTimer.interval = 250;
+            retryTimer.singleShot = true;
+            retryTimer.timeout.connect(sendUpdate);
 
             // Initial immediate broadcast
             sendUpdate();
@@ -604,6 +615,8 @@ void DockManager::updateWindows(const QString &json) {
 }
 
 void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
+    qDebug() << "[DockManager] matchWindowsToApps received" << windowList.size() << "windows";
+
     // Map of AppItem* -> QVariantList of window maps
     QMap<AppItem*, QVariantList> appWindows;
     for (QObject *obj : m_apps) {
@@ -826,6 +839,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
                 parseDesktopFile(desktopPath, dTitle, dIcon, dExec);
                 if (!dTitle.isEmpty()) title = dTitle;
                 if (!dIcon.isEmpty()) iconName = dIcon;
+                if (!dExec.isEmpty()) exec = dExec;
             } else {
                 iconName = resolveSystemIcon(key);
                 if (title.isEmpty()) title = key;
@@ -838,7 +852,21 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             }
 
             targetItem = new AppItem(key, title, iconName, exec, false, false, false, this);
-            m_apps.append(targetItem);
+
+            // In macOS, running unpinned apps appear on the left of the divider (before files/trash)
+            int insertIndex = -1;
+            for (int i = 0; i < m_apps.size(); ++i) {
+                auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+                if (item && item->dockBreaksBefore()) {
+                    insertIndex = i;
+                    break;
+                }
+            }
+            if (insertIndex >= 0) {
+                m_apps.insert(insertIndex, targetItem);
+            } else {
+                m_apps.append(targetItem);
+            }
             structureChanged = true;
         }
 
@@ -1001,6 +1029,10 @@ void DockManager::launchOrToggleApp(const QString &id) {
 }
 
 void DockManager::launchNewInstance(const QString &id) {
+    if (m_launchingAppIds.contains(id)) {
+        return;
+    }
+
     m_launchingAppIds.insert(id);
     emit hasLaunchingAppChanged();
     emit appLaunchStarted(id);
