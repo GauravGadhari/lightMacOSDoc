@@ -314,8 +314,34 @@ Item {
 
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) {
+                dockManager.dismissAllMenus();
                 contextMenu.popup();
             }
+        }
+    }
+
+    function closeAllMenus() {
+        if (contextMenu.visible) {
+            contextMenu.close();
+        }
+    }
+
+    Connections {
+        target: dockManager
+        function onDismissPopupsRequested() {
+            closeAllMenus();
+        }
+    }
+
+    Connections {
+        target: root.Window.window ? root.Window.window : null
+        function onDockSlideOffsetChanged() {
+            if (root.Window.window && root.Window.window.dockSlideOffset > 0) {
+                closeAllMenus();
+            }
+        }
+        function onDockVisibleChanged() {
+            closeAllMenus();
         }
     }
 
@@ -326,12 +352,16 @@ Item {
         onOpened: dockManager.setIsMenuOpen(true)
         onClosed: dockManager.setIsMenuOpen(false)
 
+        // 1. Open Windows List
         Repeater {
             model: (appData && appData.windows) ? appData.windows : []
             MenuItem {
                 required property var modelData
                 text: (modelData.active ? "✓ " : "   ") + (modelData.title ? (modelData.title.length > 35 ? modelData.title.substring(0, 32) + "..." : modelData.title) : "Window")
-                onTriggered: dockManager.activateWindow(modelData.id)
+                onTriggered: {
+                    dockManager.dismissAllMenus();
+                    dockManager.activateWindow(modelData.id);
+                }
             }
         }
 
@@ -339,10 +369,12 @@ Item {
             visible: appData ? (appData.windowCount > 0) : false
         }
 
+        // 2. Open / Show
         MenuItem {
-            visible: appData ? (appData.windowCount === 0) : true
+            visible: appData ? (!appData.isRunning || appData.windowCount === 0) : true
             text: (appData && appData.isRunning) ? ("Show " + appData.title) : ("Open " + (appData ? appData.title : ""))
             onTriggered: {
+                dockManager.dismissAllMenus();
                 if (appData) {
                     if (appData.isRunning && appData.windowCount > 0) {
                         jumpOnce();
@@ -354,10 +386,11 @@ Item {
             }
         }
 
+        // 3. New Window
         MenuItem {
-            visible: appData ? appData.isRunning : false
             text: "New Window"
             onTriggered: {
+                dockManager.dismissAllMenus();
                 if (appData) {
                     startContinuousJump();
                     dockManager.launchNewInstance(appData.id);
@@ -365,34 +398,72 @@ Item {
             }
         }
 
+        // 4. Close Window (Single window open)
         MenuItem {
-            visible: appData ? appData.isRunning : false
-            text: "Minimize"
-            onTriggered: { if (appData) dockManager.minimizeApp(appData.id); }
+            visible: appData ? (appData.windowCount === 1) : false
+            text: "Close Window"
+            onTriggered: {
+                dockManager.dismissAllMenus();
+                if (appData) dockManager.closeApp(appData.id);
+            }
         }
 
+        // 5. Close All Windows (Multiple windows open)
         MenuItem {
-            visible: appData ? appData.isRunning : false
-            text: "Quit " + (appData ? appData.title : "")
-            onTriggered: { if (appData) dockManager.closeApp(appData.id); }
+            visible: appData ? (appData.windowCount > 1) : false
+            text: "Close All Windows"
+            onTriggered: {
+                dockManager.dismissAllMenus();
+                if (appData) dockManager.closeApp(appData.id);
+            }
         }
 
-        MenuSeparator {}
+        // 6. Show All Windows (App Exposé)
+        MenuItem {
+            visible: appData ? (appData.windowCount > 0) : false
+            text: "Show All Windows"
+            onTriggered: {
+                dockManager.dismissAllMenus();
+                if (appData) dockManager.showAllWindows(appData.id);
+            }
+        }
 
+        MenuSeparator {
+            visible: appData ? appData.isRunning : false
+        }
+
+        // 7. Options Submenu
         Menu {
+            id: optionsMenu
             title: "Options"
 
             MenuItem {
-                visible: appData ? !appData.isPinned : false
-                text: "Keep in Dock"
-                onTriggered: { if (appData) dockManager.pinApp(appData.id); }
+                text: (appData && appData.isPinned ? "✓ " : "   ") + "Keep in Dock"
+                onTriggered: {
+                    if (appData) {
+                        if (appData.isPinned) {
+                            dockManager.unpinApp(appData.id);
+                        } else {
+                            dockManager.pinApp(appData.id);
+                        }
+                    }
+                }
             }
 
             MenuItem {
-                visible: appData ? appData.isPinned : true
+                visible: appData ? appData.isPinned : false
                 text: "Remove from Dock"
-                onTriggered: { if (appData) dockManager.removeAppById(appData.id); }
+                onTriggered: {
+                    if (appData) dockManager.unpinApp(appData.id);
+                }
             }
+
+            MenuItem {
+                text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
+                onTriggered: dockManager.toggleAutostart()
+            }
+
+            MenuSeparator {}
 
             MenuItem {
                 text: "Move Left"
@@ -410,32 +481,53 @@ Item {
                 text: (appData && appData.dockBreaksBefore) ? "Remove Divider Before" : "Add Divider Before"
                 onTriggered: { if (appData) dockManager.toggleDividerBefore(appData.id); }
             }
+        }
 
-            MenuSeparator {}
+        MenuSeparator {}
 
-            MenuItem {
-                text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
-                onTriggered: dockManager.toggleAutostart()
+        // 8. Hide
+        MenuItem {
+            visible: appData ? appData.isRunning : false
+            text: "Hide"
+            onTriggered: {
+                dockManager.dismissAllMenus();
+                if (appData) dockManager.minimizeApp(appData.id);
+            }
+        }
+
+        // 9. Quit App
+        MenuItem {
+            visible: appData ? appData.isRunning : false
+            text: "Quit " + (appData ? appData.title : "")
+            onTriggered: {
+                dockManager.dismissAllMenus();
+                if (appData) dockManager.closeApp(appData.id);
             }
         }
 
         MenuSeparator {}
 
-        MenuItem {
-            text: dockManager.isDarkTheme ? "Switch to Light Theme" : "Switch to Dark Theme"
-            onTriggered: dockManager.isDarkTheme = !dockManager.isDarkTheme
-        }
+        // 10. Dock Settings Submenu
+        Menu {
+            id: dockSettingsMenu
+            title: "Dock Settings"
 
-        MenuItem {
-            text: "Reset All Apps to Default"
-            onTriggered: dockManager.resetToDefaultApps()
-        }
+            MenuItem {
+                text: dockManager.isDarkTheme ? "Switch to Light Theme" : "Switch to Dark Theme"
+                onTriggered: dockManager.isDarkTheme = !dockManager.isDarkTheme
+            }
 
-        MenuSeparator {}
+            MenuItem {
+                text: "Reset All Apps to Default"
+                onTriggered: dockManager.resetToDefaultApps()
+            }
 
-        MenuItem {
-            text: "Quit macOS Dock"
-            onTriggered: dockManager.quitDock()
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Quit macOS Dock"
+                onTriggered: dockManager.quitDock()
+            }
         }
     }
 }

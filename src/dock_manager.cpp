@@ -50,6 +50,14 @@ void DockManager::setIsMenuOpen(bool open) {
     }
 }
 
+void DockManager::dismissAllMenus() {
+    if (m_isMenuOpen) {
+        m_isMenuOpen = false;
+        emit isMenuOpenChanged();
+    }
+    emit dismissPopupsRequested();
+}
+
 void DockManager::setAutoHidden(bool hidden) {
     m_isAutoHidden = hidden;
     qDebug() << "[DockManager] setAutoHidden called:" << hidden;
@@ -180,6 +188,38 @@ void DockManager::pinApp(const QString &id) {
             emit appsChanged();
             return;
         }
+    }
+}
+
+void DockManager::unpinApp(const QString &id) {
+    for (int i = 0; i < m_apps.size(); ++i) {
+        auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+        if (item && item->id() == id) {
+            if (item->windowCount() > 0) {
+                item->setIsPinned(false);
+                saveApps();
+                emit appsChanged();
+            } else {
+                removeApp(i);
+            }
+            return;
+        }
+    }
+}
+
+void DockManager::showAllWindows(const QString &id) {
+    for (QObject *obj : m_apps) {
+        auto *item = qobject_cast<AppItem*>(obj);
+        if (item && item->id() == id && item->windowCount() > 0) {
+            QVariantMap win = item->windows().first().toMap();
+            activateWindow(win.value("id").toString());
+            break;
+        }
+    }
+
+    QDBusInterface accel("org.kde.kglobalaccel", "/component/kwin", "org.kde.kglobalaccel.Component", QDBusConnection::sessionBus());
+    if (accel.isValid()) {
+        accel.call("invokeShortcut", "ExposeClass");
     }
 }
 
@@ -916,7 +956,6 @@ void DockManager::initDefaultApps() {
         {"contacts", "Contacts", "qrc:/icons/contacts/256.png", "kaddressbook || gnome-contacts || google-chrome --app=https://contacts.google.com", false},
         {"notes", "Notes", "qrc:/icons/notes/256.png", "kate || knotes || gedit", false},
         {"music", "Music", "qrc:/icons/music/256.png", "elisa || spotify || rhythmbox || google-chrome --app=https://music.youtube.com || xdg-open https://music.youtube.com", false},
-        {"podcasts", "Podcasts", "qrc:/icons/podcasts/256.png", "google-chrome --app=https://podcasts.google.com", false},
         {"tv", "TV", "qrc:/icons/tv/256.png", "google-chrome --app=https://www.sonyliv.com || firefox --new-window https://www.sonyliv.com || xdg-open https://www.sonyliv.com", false},
         {"appstore", "App Store", "qrc:/icons/appstore/256.png", "plasma-discover || discover || gnome-software", false},
         {"system-preferences", "System Settings", "qrc:/icons/system-preferences/256.png", "systemsettings || gnome-control-center", false},

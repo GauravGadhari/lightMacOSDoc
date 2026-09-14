@@ -59,6 +59,9 @@ public:
     Q_INVOKABLE void activateWindow(const QString &windowId);
     Q_INVOKABLE void closeWindowById(const QString &windowId);
     Q_INVOKABLE void pinApp(const QString &id);
+    Q_INVOKABLE void unpinApp(const QString &id);
+    Q_INVOKABLE void showAllWindows(const QString &id);
+    Q_INVOKABLE void dismissAllMenus();
     Q_INVOKABLE void launchCommand(const QString &command);
     Q_INVOKABLE void quitDock();
     Q_INVOKABLE void refreshRunningStatus();
@@ -84,6 +87,7 @@ signals:
     void baseIconWidthChanged();
     void maxMagnificationChanged();
     void isMenuOpenChanged();
+    void dismissPopupsRequested();
     void appLaunched(const QString &id);
     void appLaunchStarted(const QString &id);
     void appSwitched(const QString &id);

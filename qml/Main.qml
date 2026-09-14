@@ -34,7 +34,12 @@ Window {
         duration: 200
         easing.type: Easing.InCubic
 
+        onStarted: {
+            dockManager.dismissAllMenus();
+        }
+
         onFinished: {
+            dockManager.dismissAllMenus();
             if (root.dockVisible) return;
             dockManager.setAutoHidden(true);
             // MOVE (not resize!) window down. Top 6px stays on-screen = trigger.
@@ -54,6 +59,10 @@ Window {
         to: 0
         duration: 300
         easing.type: Easing.OutCubic
+
+        onStarted: {
+            dockManager.dismissAllMenus();
+        }
 
         onFinished: {
             dockContainer.requestMaskUpdate();
@@ -84,14 +93,33 @@ Window {
         interval: 34
         repeat: false
         onTriggered: {
+            dockManager.dismissAllMenus();
             dockContainer.opacity = 1;
             dockContainer.forceMaskUpdate();
             slideShowAnim.restart();
         }
     }
 
+    // ── Menu Idle Dismiss Timer ──
+    // If a menu is open and the mouse is outside the dock container for > 3.5s,
+    // automatically dismiss the menu and allow dock to auto-hide.
+    Timer {
+        id: menuIdleDismissTimer
+        interval: 3500
+        repeat: false
+        onTriggered: {
+            if (!dockContainer.isMouseInside && dockManager.isMenuOpen) {
+                dockManager.dismissAllMenus();
+                if (root.dockVisible) {
+                    autoHideTimer.restart();
+                }
+            }
+        }
+    }
+
     // ── State Transitions ──
     onDockVisibleChanged: {
+        dockManager.dismissAllMenus();
         if (dockVisible) {
             // ── REVEAL ──
             slideHideAnim.stop();
@@ -151,12 +179,32 @@ Window {
 
         onIsMouseInsideChanged: {
             if (isMouseInside) {
+                menuIdleDismissTimer.stop();
                 autoHideTimer.stop();
                 if (!root.dockVisible) {
                     root.dockVisible = true;
                 }
             } else {
-                if (root.dockVisible) {
+                if (dockManager.isMenuOpen) {
+                    menuIdleDismissTimer.restart();
+                } else if (root.dockVisible) {
+                    autoHideTimer.restart();
+                }
+            }
+        }
+    }
+
+    // ── Menu Open State Connection ──
+    Connections {
+        target: dockManager
+        function onIsMenuOpenChanged() {
+            if (dockManager.isMenuOpen) {
+                if (!dockContainer.isMouseInside) {
+                    menuIdleDismissTimer.restart();
+                }
+            } else {
+                menuIdleDismissTimer.stop();
+                if (!dockContainer.isMouseInside && root.dockVisible) {
                     autoHideTimer.restart();
                 }
             }
