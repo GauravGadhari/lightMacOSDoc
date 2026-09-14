@@ -25,26 +25,39 @@ Item {
     height: currentWidth
     clip: false
 
-    // ── macOS Dock Bounce Animation ──
+    // ── macOS Dock Bounce / Jump Animation ──
     SequentialAnimation {
         id: bounceAnim
         running: false
         loops: 3
 
         NumberAnimation {
-            target: iconVisual; property: "y"
-            from: 0; to: -35; duration: 200
+            target: bounceTranslate
+            property: "y"
+            from: 0; to: -34; duration: 180
             easing.type: Easing.OutQuad
         }
         NumberAnimation {
-            target: iconVisual; property: "y"
-            from: -35; to: 0; duration: 250
-            easing.type: Easing.OutBounce
+            target: bounceTranslate
+            property: "y"
+            from: -34; to: 0; duration: 180
+            easing.type: Easing.InQuad
         }
-        PauseAnimation { duration: 80 }
+        PauseAnimation { duration: 50 }
     }
 
-    function triggerBounce() { bounceAnim.restart(); }
+    function triggerBounce() {
+        bounceAnim.restart();
+    }
+
+    Connections {
+        target: dockManager
+        function onAppLaunched(id) {
+            if (appData && appData.id === id) {
+                bounceAnim.restart();
+            }
+        }
+    }
 
     // Tooltip
     Tooltip {
@@ -65,6 +78,11 @@ Item {
         clip: false
         opacity: root.isMarkedForRemoval ? 0.45 : (root.isDragging ? 0.8 : 1.0)
         scale: root.isMarkedForRemoval ? 0.8 : 1.0
+
+        transform: Translate {
+            id: bounceTranslate
+            y: 0
+        }
 
         Behavior on opacity { NumberAnimation { duration: 150 } }
         Behavior on scale { NumberAnimation { duration: 150 } }
@@ -205,7 +223,21 @@ Item {
         onOpened: dockManager.setIsMenuOpen(true)
         onClosed: dockManager.setIsMenuOpen(false)
 
+        Repeater {
+            model: (appData && appData.windows) ? appData.windows : []
+            MenuItem {
+                required property var modelData
+                text: (modelData.active ? "✓ " : "   ") + (modelData.title ? (modelData.title.length > 35 ? modelData.title.substring(0, 32) + "..." : modelData.title) : "Window")
+                onTriggered: dockManager.activateWindow(modelData.id)
+            }
+        }
+
+        MenuSeparator {
+            visible: appData ? (appData.windowCount > 0) : false
+        }
+
         MenuItem {
+            visible: appData ? (appData.windowCount === 0) : true
             text: (appData && appData.isRunning) ? ("Show " + appData.title) : ("Open " + (appData ? appData.title : ""))
             onTriggered: {
                 triggerBounce();
@@ -219,20 +251,6 @@ Item {
             onTriggered: {
                 triggerBounce();
                 if (appData) dockManager.launchNewInstance(appData.id);
-            }
-        }
-
-        // Multi-Window Submenu
-        Menu {
-            title: "Open Windows (" + (appData ? appData.windowCount : 0) + ")"
-            visible: appData ? (appData.windowCount > 1) : false
-
-            Repeater {
-                model: (appData && appData.windows) ? appData.windows : []
-                MenuItem {
-                    text: (modelData.active ? "● " : "  ") + (modelData.title ? (modelData.title.length > 35 ? modelData.title.substring(0, 32) + "..." : modelData.title) : "Window")
-                    onTriggered: dockManager.activateWindow(modelData.id)
-                }
             }
         }
 

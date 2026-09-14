@@ -354,6 +354,11 @@ QString DockManager::getAppQuery(const QString &id) {
     if (id == "calculator") return "kcalc|calculator";
     if (id == "music") return "spotify|elisa|rhythmbox";
     if (id == "mail") return "thunderbird|kmail|mail.google.com|gmail";
+    if (id == "maps") return "google maps|maps.google.com|maps";
+    if (id == "facetime") return "google meet|meet.google.com|meet";
+    if (id == "calendar") return "korganizer|gnome-calendar|calendar.google.com|calendar";
+    if (id == "contacts") return "kaddressbook|gnome-contacts|contacts.google.com|contacts";
+    if (id == "reminders") return "tasks.google.com|reminders|tasks";
     if (id == "notes") return "kate|knotes|gedit";
     if (id == "photos") return "gwenview|eog|shotwell";
     if (id == "appstore") return "plasma-discover|discover";
@@ -581,12 +586,48 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
 
             bool isMatch = false;
 
-            // Special case: WhatsApp Web running inside Chrome or browser
+            // Special cases: Web apps running inside Chrome or browser
             if (caption.contains("whatsapp", Qt::CaseInsensitive)) {
                 if (appId == "messages") {
                     isMatch = true;
                 } else if (appId == "safari" || appId == "google-chrome") {
                     isMatch = false; // Don't let browser steal WhatsApp
+                }
+            } else if (caption.contains("gmail", Qt::CaseInsensitive) || caption.contains("mail.google.com", Qt::CaseInsensitive)) {
+                if (appId == "mail") {
+                    isMatch = true;
+                } else if (appId == "safari" || appId == "google-chrome") {
+                    isMatch = false; // Don't let browser steal Gmail
+                }
+            } else if (caption.contains("google maps", Qt::CaseInsensitive) || caption.contains("maps.google.com", Qt::CaseInsensitive)) {
+                if (appId == "maps") {
+                    isMatch = true;
+                } else if (appId == "safari" || appId == "google-chrome") {
+                    isMatch = false;
+                }
+            } else if (caption.contains("google calendar", Qt::CaseInsensitive) || caption.contains("calendar.google.com", Qt::CaseInsensitive)) {
+                if (appId == "calendar") {
+                    isMatch = true;
+                } else if (appId == "safari" || appId == "google-chrome") {
+                    isMatch = false;
+                }
+            } else if (caption.contains("google contacts", Qt::CaseInsensitive) || caption.contains("contacts.google.com", Qt::CaseInsensitive)) {
+                if (appId == "contacts") {
+                    isMatch = true;
+                } else if (appId == "safari" || appId == "google-chrome") {
+                    isMatch = false;
+                }
+            } else if (caption.contains("google tasks", Qt::CaseInsensitive) || caption.contains("tasks.google.com", Qt::CaseInsensitive)) {
+                if (appId == "reminders") {
+                    isMatch = true;
+                } else if (appId == "safari" || appId == "google-chrome") {
+                    isMatch = false;
+                }
+            } else if (caption.contains("google meet", Qt::CaseInsensitive) || caption.contains("meet.google.com", Qt::CaseInsensitive)) {
+                if (appId == "facetime") {
+                    isMatch = true;
+                } else if (appId == "safari" || appId == "google-chrome") {
+                    isMatch = false;
                 }
             }
 
@@ -598,9 +639,19 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
                 for (const QString &q : queries) {
                     if (!q.isEmpty()) {
                         if (desktopFile.contains(q) || resourceClass.contains(q) || resourceName.contains(q)) {
-                            // Don't match WhatsApp to browser
-                            if ((appId == "safari" || appId == "google-chrome") && caption.contains("whatsapp", Qt::CaseInsensitive)) {
-                                continue;
+                            // Don't match Web apps to general browser
+                            if (appId == "safari" || appId == "google-chrome") {
+                                if (caption.contains("whatsapp", Qt::CaseInsensitive) ||
+                                    caption.contains("gmail", Qt::CaseInsensitive) ||
+                                    caption.contains("mail.google.com", Qt::CaseInsensitive) ||
+                                    caption.contains("google maps", Qt::CaseInsensitive) ||
+                                    caption.contains("maps.google.com", Qt::CaseInsensitive) ||
+                                    caption.contains("calendar.google.com", Qt::CaseInsensitive) ||
+                                    caption.contains("contacts.google.com", Qt::CaseInsensitive) ||
+                                    caption.contains("tasks.google.com", Qt::CaseInsensitive) ||
+                                    caption.contains("meet.google.com", Qt::CaseInsensitive)) {
+                                    continue;
+                                }
                             }
                             isMatch = true;
                             break;
@@ -945,7 +996,7 @@ void DockManager::setMaxMagnification(double mag) {
 void DockManager::launchCommand(const QString &command) {
     if (command.isEmpty()) return;
     qDebug() << "Launching command detached:" << command;
-    QProcess::startDetached("sh", QStringList() << "-c" << QString("nohup %1 >/dev/null 2>&1 &").arg(command));
+    QProcess::startDetached("sh", QStringList() << "-c" << QString("( %1 ) >/dev/null 2>&1 &").arg(command));
 }
 
 void DockManager::quitDock() {

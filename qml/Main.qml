@@ -163,11 +163,11 @@ Window {
         }
     }
 
-    // ── App Launch Auto-Dismiss ──
+    // ── App Launch Auto-Dismiss (allows bounce animation to complete) ──
     Connections {
         target: dockManager
         function onAppLaunched(id) {
-            autoHideTimer.interval = 300;
+            autoHideTimer.interval = 1600;
             autoHideTimer.restart();
             Qt.callLater(function() { autoHideTimer.interval = 700; });
         }
