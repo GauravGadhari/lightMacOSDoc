@@ -473,6 +473,12 @@ void DockManager::setupKWinWindowTracker() {
                 for (var i = 0; i < clients.length; i++) {
                     var c = clients[i];
                     if (!c || !c.normalWindow) continue;
+                    var winStr = (c.desktopFileName + " " + c.resourceClass + " " + c.resourceName + " " + c.caption).toLowerCase();
+                    if (winStr.indexOf("macos-dock") !== -1 || winStr.indexOf("macos_dock") !== -1 ||
+                        winStr.indexOf("xwaylandvideobridge") !== -1 || winStr.indexOf("video bridge") !== -1 ||
+                        winStr.indexOf("plasmashell") !== -1 || winStr.indexOf("krunner") !== -1) {
+                        continue;
+                    }
                     list.push({
                         "id": c.internalId ? c.internalId.toString() : ("win_" + i),
                         "desktopFile": c.desktopFileName ? c.desktopFileName : "",
@@ -492,6 +498,12 @@ void DockManager::setupKWinWindowTracker() {
 
         function hookWindow(c) {
             if (!c || !c.normalWindow) return;
+            var winStr = (c.desktopFileName + " " + c.resourceClass + " " + c.resourceName + " " + c.caption).toLowerCase();
+            if (winStr.indexOf("macos-dock") !== -1 || winStr.indexOf("macos_dock") !== -1 ||
+                winStr.indexOf("xwaylandvideobridge") !== -1 || winStr.indexOf("video bridge") !== -1 ||
+                winStr.indexOf("plasmashell") !== -1 || winStr.indexOf("krunner") !== -1) {
+                return;
+            }
             try {
                 c.minimizedChanged.connect(sendUpdate);
                 c.captionChanged.connect(sendUpdate);
@@ -613,8 +625,24 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
         QString resourceClass = obj["resourceClass"].toString().toLower();
         QString resourceName = obj["resourceName"].toString().toLower();
         QString caption = obj["caption"].toString();
+        QString lowerCaption = caption.toLower();
         bool minimized = obj["minimized"].toBool();
         bool active = obj["active"].toBool();
+
+        // Filter out dock itself, xwaylandvideobridge, and background daemons
+        if (desktopFile.contains("macos-dock") || desktopFile.contains("macos_dock") ||
+            resourceClass.contains("macos-dock") || resourceClass.contains("macos_dock") ||
+            resourceName.contains("macos-dock") || resourceName.contains("macos_dock") ||
+            lowerCaption == "macos dock" || lowerCaption.contains("macos-dock")) {
+            continue;
+        }
+
+        if (desktopFile.contains("xwaylandvideobridge") || resourceClass.contains("xwaylandvideobridge") ||
+            resourceName.contains("xwaylandvideobridge") || lowerCaption.contains("video bridge") ||
+            lowerCaption.contains("xwayland video bridge") || desktopFile.contains("videobridge") ||
+            resourceClass.contains("videobridge")) {
+            continue;
+        }
 
         QVariantMap winMap;
         winMap["id"] = winId;
@@ -723,6 +751,16 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
     QMap<QString, QList<UnassignedWin>> grouped;
     for (const auto &uw : unassigned) {
         QString key = !uw.desktopFile.isEmpty() ? uw.desktopFile : (!uw.resourceClass.isEmpty() ? uw.resourceClass : uw.resourceName);
+        QString keyLower = key.toLower();
+        QString captionLower = uw.caption.toLower();
+
+        if (keyLower.contains("macos-dock") || keyLower.contains("macos_dock") ||
+            keyLower.contains("xwaylandvideobridge") || keyLower.contains("videobridge") ||
+            captionLower.contains("video bridge") || captionLower == "macos dock" ||
+            captionLower.contains("macos-dock")) {
+            continue;
+        }
+
         if (!key.isEmpty()) {
             grouped[key].append(uw);
         }
@@ -730,6 +768,11 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
 
     for (auto it = grouped.begin(); it != grouped.end(); ++it) {
         QString key = it.key();
+        QString keyLower = key.toLower();
+        if (keyLower.contains("macos-dock") || keyLower.contains("macos_dock") ||
+            keyLower.contains("xwaylandvideobridge") || keyLower.contains("videobridge")) {
+            continue;
+        }
         const auto &wins = it.value();
 
         // Check if an unpinned item already exists for this key
@@ -806,13 +849,21 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
         }
     }
 
-    // Clean up unpinned apps with 0 windows
+    // Clean up unpinned apps with 0 windows or blacklisted apps
     for (int i = m_apps.size() - 1; i >= 0; --i) {
         auto *item = qobject_cast<AppItem*>(m_apps.at(i));
-        if (item && !item->isPinned() && item->windowCount() == 0) {
-            m_apps.removeAt(i);
-            item->deleteLater();
-            structureChanged = true;
+        if (item && !item->isPinned()) {
+            QString idLower = item->id().toLower();
+            QString titleLower = item->title().toLower();
+            bool isBlacklisted = idLower.contains("macos-dock") || idLower.contains("macos_dock") ||
+                                 idLower.contains("xwaylandvideobridge") || idLower.contains("videobridge") ||
+                                 titleLower.contains("video bridge") || titleLower == "macos dock" ||
+                                 titleLower.contains("macos-dock");
+            if (item->windowCount() == 0 || isBlacklisted) {
+                m_apps.removeAt(i);
+                item->deleteLater();
+                structureChanged = true;
+            }
         }
     }
 
@@ -882,9 +933,33 @@ void DockManager::launchOrToggleApp(const QString &id) {
                 activateWindow(winId);
             }
         } else {
-            // Multiple windows: activate the next/first window
-            QVariantMap win = targetApp->windows().first().toMap();
-            activateWindow(win.value("id").toString());
+            // Multiple windows: cycle through all windows in round-robin order!
+            const auto &windows = targetApp->windows();
+            int activeIndex = -1;
+            for (int i = 0; i < windows.size(); ++i) {
+                if (windows[i].toMap().value("active").toBool()) {
+                    activeIndex = i;
+                    break;
+                }
+            }
+
+            int nextIndex = 0;
+            if (activeIndex >= 0) {
+                // If currently focused on a window of this app, switch to the NEXT window!
+                nextIndex = (activeIndex + 1) % windows.size();
+            } else {
+                // None currently active -> find first non-minimized or first window
+                nextIndex = 0;
+                for (int i = 0; i < windows.size(); ++i) {
+                    if (!windows[i].toMap().value("minimized").toBool()) {
+                        nextIndex = i;
+                        break;
+                    }
+                }
+            }
+
+            QString nextWinId = windows[nextIndex].toMap().value("id").toString();
+            activateWindow(nextWinId);
         }
     } else {
         // App is not running -> Launch new instance! Jumps until window opens!

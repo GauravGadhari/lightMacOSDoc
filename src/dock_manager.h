@@ -43,7 +43,7 @@ public:
     void setAutostartEnabled(bool enabled);
     void setBaseIconWidth(double width);
     void setMaxMagnification(double mag);
-    void setIsMenuOpen(bool open);
+    Q_INVOKABLE void setIsMenuOpen(bool open);
 
     Q_INVOKABLE void toggleAutostart();
 

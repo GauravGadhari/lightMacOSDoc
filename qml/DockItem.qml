@@ -349,8 +349,8 @@ Item {
     Menu {
         id: contextMenu
 
-        onOpened: dockManager.setIsMenuOpen(true)
-        onClosed: dockManager.setIsMenuOpen(false)
+        onOpened: dockManager.isMenuOpen = true
+        onClosed: dockManager.isMenuOpen = false
 
         // 1. Open Windows List
         Repeater {
