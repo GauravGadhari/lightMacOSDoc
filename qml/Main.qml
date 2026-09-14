@@ -69,8 +69,8 @@ Window {
         interval: 700
         repeat: false
         onTriggered: {
-            // Auto-hide when mouse is outside the dock and no context menu is open
-            if (!dockContainer.isMouseInside && !dockManager.isMenuOpen) {
+            // Auto-hide when mouse is outside the dock, no menu is open, and no app is launching
+            if (!dockContainer.isMouseInside && !dockManager.isMenuOpen && !dockManager.hasLaunchingApp) {
                 root.dockVisible = false;
             }
         }
@@ -163,13 +163,15 @@ Window {
         }
     }
 
-    // ── App Launch Auto-Dismiss (allows bounce animation to complete) ──
+    // ── App Launch Auto-Dismiss (waits until launch finishes before dismissing) ──
     Connections {
         target: dockManager
-        function onAppLaunched(id) {
-            autoHideTimer.interval = 1600;
-            autoHideTimer.restart();
-            Qt.callLater(function() { autoHideTimer.interval = 700; });
+        function onHasLaunchingAppChanged() {
+            if (!dockManager.hasLaunchingApp && !dockContainer.isMouseInside) {
+                autoHideTimer.interval = 800;
+                autoHideTimer.restart();
+                Qt.callLater(function() { autoHideTimer.interval = 700; });
+            }
         }
     }
 }

@@ -675,6 +675,11 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
     // Assign windows to matched apps
     for (auto it = appWindows.begin(); it != appWindows.end(); ++it) {
         it.key()->setWindows(it.value());
+        if (it.key()->windowCount() > 0 && m_launchingAppIds.contains(it.key()->id())) {
+            m_launchingAppIds.remove(it.key()->id());
+            emit appLaunchFinished(it.key()->id());
+            emit hasLaunchingAppChanged();
+        }
     }
 
     // Process unassigned windows (Dynamic Unpinned Running Apps)
@@ -750,6 +755,11 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             wList.append(wMap);
         }
         targetItem->setWindows(wList);
+        if (targetItem->windowCount() > 0 && m_launchingAppIds.contains(targetItem->id())) {
+            m_launchingAppIds.remove(targetItem->id());
+            emit appLaunchFinished(targetItem->id());
+            emit hasLaunchingAppChanged();
+        }
     }
 
     // Clean up unpinned apps with 0 windows
@@ -799,8 +809,6 @@ void DockManager::closeWindowById(const QString &windowId) {
 }
 
 void DockManager::launchOrToggleApp(const QString &id) {
-    emit appLaunched(id);
-
     // Find the app in m_apps
     AppItem *targetApp = nullptr;
     for (QObject *obj : m_apps) {
@@ -812,7 +820,9 @@ void DockManager::launchOrToggleApp(const QString &id) {
     }
 
     if (targetApp && targetApp->windowCount() > 0) {
-        // If app has windows open
+        // App is already running -> Switch / toggle window! Jumps ONCE!
+        emit appSwitched(id);
+
         if (targetApp->windowCount() == 1) {
             // Single window toggle
             QVariantMap win = targetApp->windows().first().toMap();
@@ -833,12 +843,25 @@ void DockManager::launchOrToggleApp(const QString &id) {
             activateWindow(win.value("id").toString());
         }
     } else {
-        // App is not running -> Launch new instance!
+        // App is not running -> Launch new instance! Jumps until window opens!
         launchNewInstance(id);
     }
 }
 
 void DockManager::launchNewInstance(const QString &id) {
+    m_launchingAppIds.insert(id);
+    emit hasLaunchingAppChanged();
+    emit appLaunchStarted(id);
+    emit appLaunched(id);
+
+    // Timeout safety fallback if process never creates a window
+    QTimer::singleShot(15000, this, [this, id]() {
+        if (m_launchingAppIds.remove(id)) {
+            emit appLaunchFinished(id);
+            emit hasLaunchingAppChanged();
+        }
+    });
+
     for (QObject *obj : m_apps) {
         auto *item = qobject_cast<AppItem*>(obj);
         if (item && item->id() == id) {

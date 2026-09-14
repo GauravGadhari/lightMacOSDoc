@@ -12,6 +12,7 @@
 #include <QDBusConnection>
 #include <QTemporaryFile>
 #include <QVariantList>
+#include <QSet>
 #include "app_item.h"
 
 class DockManager : public QObject {
@@ -24,6 +25,7 @@ class DockManager : public QObject {
     Q_PROPERTY(double baseIconWidth READ baseIconWidth WRITE setBaseIconWidth NOTIFY baseIconWidthChanged)
     Q_PROPERTY(double maxMagnification READ maxMagnification WRITE setMaxMagnification NOTIFY maxMagnificationChanged)
     Q_PROPERTY(bool isMenuOpen READ isMenuOpen WRITE setIsMenuOpen NOTIFY isMenuOpenChanged)
+    Q_PROPERTY(bool hasLaunchingApp READ hasLaunchingApp NOTIFY hasLaunchingAppChanged)
 
 public:
     explicit DockManager(QObject *parent = nullptr);
@@ -35,6 +37,7 @@ public:
     double baseIconWidth() const { return m_baseIconWidth; }
     double maxMagnification() const { return m_maxMagnification; }
     bool isMenuOpen() const { return m_isMenuOpen; }
+    bool hasLaunchingApp() const { return !m_launchingAppIds.isEmpty(); }
 
     void setIsDarkTheme(bool isDark);
     void setAutostartEnabled(bool enabled);
@@ -82,6 +85,10 @@ signals:
     void maxMagnificationChanged();
     void isMenuOpenChanged();
     void appLaunched(const QString &id);
+    void appLaunchStarted(const QString &id);
+    void appSwitched(const QString &id);
+    void appLaunchFinished(const QString &id);
+    void hasLaunchingAppChanged();
 
 private:
     void initDefaultApps();
@@ -98,6 +105,7 @@ private:
     bool runKWinScript(const QString &scriptCode, QString *outResult = nullptr);
 
     QList<QObject*> m_apps;
+    QSet<QString> m_launchingAppIds;
     QTimer *m_pollTimer = nullptr;
     QQuickWindow *m_window = nullptr;
     int m_kwinTrackerScriptId = -1;

@@ -25,11 +25,33 @@ Item {
     height: currentWidth
     clip: false
 
-    // ── macOS Dock Bounce / Jump Animation ──
+    property bool isLaunching: false
+
+    // ── Single jump (loops: 1) for switching / focusing an already running app ──
     SequentialAnimation {
-        id: bounceAnim
+        id: singleJumpAnim
         running: false
-        loops: 3
+        loops: 1
+
+        NumberAnimation {
+            target: bounceTranslate
+            property: "y"
+            from: 0; to: -26; duration: 150
+            easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+            target: bounceTranslate
+            property: "y"
+            from: -26; to: 0; duration: 160
+            easing.type: Easing.InQuad
+        }
+    }
+
+    // ── Continuous jump (loops: Animation.Infinite) while opening an app until window appears ──
+    SequentialAnimation {
+        id: continuousJumpAnim
+        running: false
+        loops: Animation.Infinite
 
         NumberAnimation {
             target: bounceTranslate
@@ -43,18 +65,77 @@ Item {
             from: -34; to: 0; duration: 180
             easing.type: Easing.InQuad
         }
-        PauseAnimation { duration: 50 }
+        PauseAnimation { duration: 40 }
     }
 
-    function triggerBounce() {
-        bounceAnim.restart();
+    // Smooth return to ground when stopping continuous jump
+    NumberAnimation {
+        id: returnToGroundAnim
+        target: bounceTranslate
+        property: "y"
+        to: 0
+        duration: 120
+        easing.type: Easing.OutQuad
+    }
+
+    function jumpOnce() {
+        if (!isLaunching) {
+            singleJumpAnim.restart();
+        }
+    }
+
+    function startContinuousJump() {
+        singleJumpAnim.stop();
+        isLaunching = true;
+        launchTimeoutTimer.restart();
+        continuousJumpAnim.restart();
+    }
+
+    function stopContinuousJump() {
+        launchTimeoutTimer.stop();
+        if (isLaunching || continuousJumpAnim.running) {
+            isLaunching = false;
+            continuousJumpAnim.stop();
+            returnToGroundAnim.restart();
+        }
+    }
+
+    Timer {
+        id: launchTimeoutTimer
+        interval: 15000 // 15 seconds safety timeout
+        repeat: false
+        onTriggered: stopContinuousJump()
+    }
+
+    Connections {
+        target: appData ? appData : null
+        function onWindowCountChanged() {
+            if (appData && appData.windowCount > 0 && isLaunching) {
+                stopContinuousJump();
+            }
+        }
+        function onIsRunningChanged() {
+            if (appData && appData.isRunning && isLaunching) {
+                stopContinuousJump();
+            }
+        }
     }
 
     Connections {
         target: dockManager
-        function onAppLaunched(id) {
+        function onAppLaunchStarted(id) {
             if (appData && appData.id === id) {
-                bounceAnim.restart();
+                startContinuousJump();
+            }
+        }
+        function onAppSwitched(id) {
+            if (appData && appData.id === id) {
+                jumpOnce();
+            }
+        }
+        function onAppLaunchFinished(id) {
+            if (appData && appData.id === id) {
+                stopContinuousJump();
             }
         }
     }
@@ -123,16 +204,32 @@ Item {
         }
     }
 
-    // Running Indicator Dot
+    // Running / Active Indicator Dot
     Rectangle {
         id: runningDot
-        width: 4; height: 4; radius: 2
+        property bool isActiveApp: appData ? appData.isActive : false
+        width: isActiveApp ? 5 : 4
+        height: isActiveApp ? 5 : 4
+        radius: width / 2
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.bottom
         anchors.topMargin: 2
-        color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.85) : Qt.rgba(0.1, 0.1, 0.1, 0.85)
+
+        color: {
+            if (isActiveApp) {
+                // Vibrant Apple Blue for the active focused app window
+                return dockManager.isDarkTheme ? "#0A84FF" : "#007AFF";
+            }
+            // Neutral translucent dot for inactive background running apps
+            return dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.65) : Qt.rgba(0.2, 0.2, 0.2, 0.65);
+        }
+
         opacity: (appData && appData.isRunning && !root.isDragging) ? 1.0 : 0.0
+
         Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.OutQuad } }
+        Behavior on color { ColorAnimation { duration: 200 } }
+        Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
+        Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
     }
 
     // Mouse Interaction & Drag-to-Rearrange / Remove
@@ -197,8 +294,14 @@ Item {
                     root.isMarkedForRemoval = false;
                     dragTriggered = false;
                 } else {
-                    triggerBounce();
-                    if (appData) dockManager.launchOrToggleApp(appData.id);
+                    if (appData) {
+                        if (appData.isRunning && appData.windowCount > 0) {
+                            jumpOnce();
+                        } else {
+                            startContinuousJump();
+                        }
+                        dockManager.launchOrToggleApp(appData.id);
+                    }
                 }
             }
         }
@@ -240,8 +343,14 @@ Item {
             visible: appData ? (appData.windowCount === 0) : true
             text: (appData && appData.isRunning) ? ("Show " + appData.title) : ("Open " + (appData ? appData.title : ""))
             onTriggered: {
-                triggerBounce();
-                if (appData) dockManager.launchOrToggleApp(appData.id);
+                if (appData) {
+                    if (appData.isRunning && appData.windowCount > 0) {
+                        jumpOnce();
+                    } else {
+                        startContinuousJump();
+                    }
+                    dockManager.launchOrToggleApp(appData.id);
+                }
             }
         }
 
@@ -249,8 +358,10 @@ Item {
             visible: appData ? appData.isRunning : false
             text: "New Window"
             onTriggered: {
-                triggerBounce();
-                if (appData) dockManager.launchNewInstance(appData.id);
+                if (appData) {
+                    startContinuousJump();
+                    dockManager.launchNewInstance(appData.id);
+                }
             }
         }
 
