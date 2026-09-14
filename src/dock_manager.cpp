@@ -353,7 +353,7 @@ QString DockManager::getAppQuery(const QString &id) {
     if (id == "system-preferences") return "systemsettings|control-center";
     if (id == "calculator") return "kcalc|calculator";
     if (id == "music") return "spotify|elisa|rhythmbox";
-    if (id == "mail") return "thunderbird|kmail";
+    if (id == "mail") return "thunderbird|kmail|mail.google.com|gmail";
     if (id == "notes") return "kate|knotes|gedit";
     if (id == "photos") return "gwenview|eog|shotwell";
     if (id == "appstore") return "plasma-discover|discover";
@@ -851,10 +851,9 @@ void DockManager::initDefaultApps() {
 
     QList<AppDef> defaultList = {
         {"finder", "Finder", "qrc:/icons/finder/256.png", "dolphin ~ || nautilus ~ || xdg-open ~", false},
-        {"launchpad", "Launchpad", "qrc:/icons/launchpad/256.png", "krunner || rofi -show drun || wofi --show drun", false},
         {"safari", "Safari", "qrc:/icons/safari/256.png", "google-chrome || firefox || xdg-open https://google.com", false},
         {"messages", "WhatsApp", "qrc:/icons/messages/256.png", "google-chrome --app=https://web.whatsapp.com || firefox --new-window https://web.whatsapp.com || xdg-open https://web.whatsapp.com", false},
-        {"mail", "Mail", "qrc:/icons/mail/256.png", "thunderbird || kmail || xdg-open mailto:", false},
+        {"mail", "Mail", "qrc:/icons/mail/256.png", "google-chrome --app=https://mail.google.com || firefox --new-window https://mail.google.com || thunderbird || xdg-open https://mail.google.com", false},
         {"maps", "Maps", "qrc:/icons/maps/256.png", "google-chrome --app=https://maps.google.com || xdg-open https://maps.google.com", false},
         {"photos", "Photos", "qrc:/icons/photos/256.png", "gwenview || eog || shotwell || xdg-open ~/Pictures", false},
         {"facetime", "FaceTime", "qrc:/icons/facetime/256.png", "google-chrome --app=https://meet.google.com || xdg-open https://meet.google.com", false},
