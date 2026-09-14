@@ -112,6 +112,13 @@
         <file alias="icons/reminders/256.png">assets/icons/reminders/256.png</file>
         <file alias="icons/reminders/32.png">assets/icons/reminders/32.png</file>
         <file alias="icons/reminders/512.png">assets/icons/reminders/512.png</file>
+        <file alias="icons/spectacle/16.png">assets/icons/spectacle/16.png</file>
+        <file alias="icons/spectacle/32.png">assets/icons/spectacle/32.png</file>
+        <file alias="icons/spectacle/64.png">assets/icons/spectacle/64.png</file>
+        <file alias="icons/spectacle/128.png">assets/icons/spectacle/128.png</file>
+        <file alias="icons/spectacle/256.png">assets/icons/spectacle/256.png</file>
+        <file alias="icons/spectacle/512.png">assets/icons/spectacle/512.png</file>
+        <file alias="icons/spectacle/1024.png">assets/icons/spectacle/1024.png</file>
         <file alias="icons/safari/1024.png">assets/icons/safari/1024.png</file>
         <file alias="icons/safari/128.webp">assets/icons/safari/128.webp</file>
         <file alias="icons/safari/16.png">assets/icons/safari/16.png</file>

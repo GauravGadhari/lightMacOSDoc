@@ -267,7 +267,19 @@ QString DockManager::resolveSystemIcon(const QString &iconName) {
         cleanName = QFileInfo(cleanName).completeBaseName();
     }
 
+    // Special macOS Dock bundled overrides
+    if (cleanName == "spectacle" || cleanName == "org.kde.spectacle" || cleanName == "accessories-screenshot") {
+        return "qrc:/icons/spectacle/256.png";
+    }
+
+    QString home = QDir::homePath();
     QStringList searchPaths = {
+        home + "/.local/share/icons/MacTahoe/apps/scalable/",
+        home + "/.local/share/icons/MacTahoe-dark/apps/scalable/",
+        home + "/.local/share/icons/WhiteSur/apps/scalable/",
+        home + "/.local/share/icons/MacTahoe/apps/256x256/",
+        home + "/.local/share/icons/MacTahoe-dark/apps/256x256/",
+        home + "/.local/share/icons/WhiteSur/apps/256x256/",
         "/usr/share/icons/hicolor/256x256/apps/",
         "/usr/share/icons/hicolor/128x128/apps/",
         "/usr/share/icons/hicolor/scalable/apps/",
@@ -275,8 +287,8 @@ QString DockManager::resolveSystemIcon(const QString &iconName) {
         "/usr/share/icons/hicolor/48x48/apps/",
         "/usr/share/icons/breeze/apps/48/",
         "/usr/share/pixmaps/",
-        QDir::homePath() + "/.local/share/icons/hicolor/256x256/apps/",
-        QDir::homePath() + "/.local/share/icons/hicolor/scalable/apps/"
+        home + "/.local/share/icons/hicolor/256x256/apps/",
+        home + "/.local/share/icons/hicolor/scalable/apps/"
     };
 
     QStringList extensions = {".png", ".svg", ".xpm"};
@@ -399,6 +411,7 @@ QString DockManager::getAppQuery(const QString &id) {
     if (id == "photos") return "gwenview|eog|shotwell";
     if (id == "appstore") return "plasma-discover|discover";
     if (id == "tv") return "sonyliv|sony liv|vlc";
+    if (id == "spectacle" || id == "org.kde.spectacle") return "spectacle";
     return id;
 }
 
@@ -743,6 +756,9 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             // Search desktop files for real name & icon
             QString desktopPath = "/usr/share/applications/" + cleanKey + ".desktop";
             if (!QFile::exists(desktopPath)) {
+                desktopPath = "/usr/share/applications/org.kde." + cleanKey + ".desktop";
+            }
+            if (!QFile::exists(desktopPath)) {
                 desktopPath = QDir::homePath() + "/.local/share/applications/" + cleanKey + ".desktop";
             }
             if (!QFile::exists(desktopPath)) {
@@ -761,6 +777,11 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
                 iconName = resolveSystemIcon(key);
                 if (title.isEmpty()) title = key;
                 if (!title.isEmpty()) title[0] = title[0].toUpper();
+            }
+
+            if (cleanKey.contains("spectacle", Qt::CaseInsensitive)) {
+                iconName = "qrc:/icons/spectacle/256.png";
+                title = "Spectacle";
             }
 
             targetItem = new AppItem(key, title, iconName, exec, false, false, false, this);
