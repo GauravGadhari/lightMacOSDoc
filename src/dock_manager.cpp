@@ -27,15 +27,14 @@ DockManager::DockManager(QObject *parent) : QObject(parent) {
 
     setupKWinWindowTracker();
 
+    // Health check timer to verify KWin tracker is alive (e.g. across KWin restarts)
     m_pollTimer = new QTimer(this);
-    connect(m_pollTimer, &QTimer::timeout, this, &DockManager::refreshRunningStatus);
-    m_pollTimer->start(1000);
-
-    // Initial check
-    QTimer::singleShot(200, this, &DockManager::refreshRunningStatus);
+    connect(m_pollTimer, &QTimer::timeout, this, &DockManager::checkTrackerHealth);
+    m_pollTimer->start(4000);
 }
 
 DockManager::~DockManager() {
+    cleanupKWinWindowTracker();
     qDeleteAll(m_apps);
     m_apps.clear();
 }
@@ -362,7 +361,7 @@ QString DockManager::getAppQuery(const QString &id) {
     return id;
 }
 
-bool DockManager::runKWinScript(const QString &scriptCode, QString *outResult) {
+bool DockManager::executeKWinAction(const QString &scriptCode) {
     QTemporaryFile tempFile;
     if (!tempFile.open()) return false;
     tempFile.write(scriptCode.toUtf8());
@@ -374,8 +373,11 @@ bool DockManager::runKWinScript(const QString &scriptCode, QString *outResult) {
         return false;
     }
 
-    QDBusReply<int> reply = scriptingInterface.call("loadScript", filePath, QString("dock_%1").arg(QDateTime::currentMSecsSinceEpoch()));
-    if (!reply.isValid()) {
+    // Always unload any previous action script to guarantee zero accumulation
+    scriptingInterface.call("unloadScript", "dock_action");
+
+    QDBusReply<int> reply = scriptingInterface.call("loadScript", filePath, "dock_action");
+    if (!reply.isValid() || reply.value() < 0) {
         return false;
     }
 
@@ -384,45 +386,139 @@ bool DockManager::runKWinScript(const QString &scriptCode, QString *outResult) {
 
     QDBusInterface scriptInterface("org.kde.KWin", scriptPath, "org.kde.kwin.Script", QDBusConnection::sessionBus());
     scriptInterface.call("run");
-    scriptInterface.call("stop");
 
+    // Immediately unload to ensure zero script leak
+    scriptingInterface.call("unloadScript", "dock_action");
     return true;
 }
 
+bool DockManager::runKWinScript(const QString &scriptCode, QString *outResult) {
+    Q_UNUSED(outResult);
+    return executeKWinAction(scriptCode);
+}
+
 void DockManager::setupKWinWindowTracker() {
-    // Persistent KWin Script that listens for window events and sends them over D-Bus
-    QString script = R"(
-        function notifyWindows() {
-            var list = [];
-            var clients = workspace.windowList();
-            for (var i = 0; i < clients.length; i++) {
-                var c = clients[i];
-                if (!c.normalWindow) continue;
-                list.push({
-                    "id": c.internalId ? c.internalId.toString() : ("win_" + i),
-                    "desktopFile": c.desktopFileName ? c.desktopFileName : "",
-                    "resourceClass": c.resourceClass ? c.resourceClass : "",
-                    "resourceName": c.resourceName ? c.resourceName : "",
-                    "caption": c.caption ? c.caption : "",
-                    "minimized": c.minimized ? true : false,
-                    "active": (workspace.activeWindow === c),
-                    "pid": c.pid ? c.pid : 0
-                });
+    QDBusInterface scriptingInterface("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", QDBusConnection::sessionBus());
+    if (!scriptingInterface.isValid()) {
+        qWarning() << "[DockManager] KWin Scripting interface is not available on D-Bus";
+        return;
+    }
+
+    // Always unload any existing tracker script first to prevent duplicates
+    scriptingInterface.call("unloadScript", "macos_dock_tracker");
+
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(configDir);
+    QString scriptFilePath = configDir + "/macos_dock_tracker.js";
+
+    QString scriptCode = R"(
+        function sendUpdate() {
+            try {
+                var list = [];
+                var clients = workspace.windowList();
+                for (var i = 0; i < clients.length; i++) {
+                    var c = clients[i];
+                    if (!c || !c.normalWindow) continue;
+                    list.push({
+                        "id": c.internalId ? c.internalId.toString() : ("win_" + i),
+                        "desktopFile": c.desktopFileName ? c.desktopFileName : "",
+                        "resourceClass": c.resourceClass ? c.resourceClass : "",
+                        "resourceName": c.resourceName ? c.resourceName : "",
+                        "caption": c.caption ? c.caption : "",
+                        "minimized": c.minimized ? true : false,
+                        "active": (workspace.activeWindow === c),
+                        "pid": c.pid ? c.pid : 0
+                    });
+                }
+                callDBus("org.kde.MacOSDock", "/WindowTracker", "org.kde.MacOSDock", "updateWindows", JSON.stringify(list));
+            } catch (err) {
+                console.warn("[MacOSDock Tracker Error]: " + err);
             }
-            callDBus("org.kde.MacOSDock", "/WindowTracker", "org.kde.MacOSDock", "updateWindows", JSON.stringify(list));
+        }
+
+        function hookWindow(c) {
+            if (!c || !c.normalWindow) return;
+            try {
+                c.minimizedChanged.connect(sendUpdate);
+                c.captionChanged.connect(sendUpdate);
+                c.activeChanged.connect(sendUpdate);
+            } catch(e) {}
         }
 
         try {
-            workspace.windowAdded.connect(notifyWindows);
-            workspace.windowRemoved.connect(notifyWindows);
-            workspace.windowActivated.connect(notifyWindows);
-            notifyWindows();
+            workspace.windowAdded.connect(function(c) {
+                hookWindow(c);
+                sendUpdate();
+            });
+            workspace.windowRemoved.connect(sendUpdate);
+
+            // Plasma 6 standard signal
+            if (workspace.activeWindowChanged) {
+                workspace.activeWindowChanged.connect(sendUpdate);
+            }
+            // Plasma 5 backward compatibility
+            if (workspace.windowActivated) {
+                workspace.windowActivated.connect(sendUpdate);
+            }
+
+            // Hook all existing open windows
+            var initialWindows = workspace.windowList();
+            for (var j = 0; j < initialWindows.length; j++) {
+                hookWindow(initialWindows[j]);
+            }
+
+            // Internal compositor timer to guarantee 100% synchronization without IPC leaks
+            var syncTimer = new QTimer();
+            syncTimer.interval = 1000;
+            syncTimer.timeout.connect(sendUpdate);
+            syncTimer.start();
+
+            // Initial immediate broadcast
+            sendUpdate();
         } catch(e) {
-            notifyWindows();
+            console.warn("[MacOSDock Tracker Hook Error]: " + e);
+            sendUpdate();
         }
     )";
 
-    runKWinScript(script);
+    QFile file(scriptFilePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "[DockManager] Could not write KWin script to" << scriptFilePath;
+        return;
+    }
+    file.write(scriptCode.toUtf8());
+    file.close();
+
+    QDBusReply<int> reply = scriptingInterface.call("loadScript", scriptFilePath, "macos_dock_tracker");
+    if (!reply.isValid() || reply.value() < 0) {
+        qWarning() << "[DockManager] Failed to load macos_dock_tracker into KWin:" << reply.error().message();
+        return;
+    }
+
+    m_kwinTrackerScriptId = reply.value();
+    QString scriptPath = QString("/Scripting/Script%1").arg(m_kwinTrackerScriptId);
+    QDBusInterface scriptInterface("org.kde.KWin", scriptPath, "org.kde.kwin.Script", QDBusConnection::sessionBus());
+    scriptInterface.call("run");
+    qDebug() << "[DockManager] Persistent KWin tracker loaded and running as Script" << m_kwinTrackerScriptId;
+}
+
+void DockManager::cleanupKWinWindowTracker() {
+    QDBusInterface scriptingInterface("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", QDBusConnection::sessionBus());
+    if (scriptingInterface.isValid()) {
+        scriptingInterface.call("unloadScript", "macos_dock_tracker");
+    }
+    m_kwinTrackerScriptId = -1;
+}
+
+void DockManager::checkTrackerHealth() {
+    QDBusInterface scriptingInterface("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", QDBusConnection::sessionBus());
+    if (!scriptingInterface.isValid()) return;
+
+    QDBusReply<bool> reply = scriptingInterface.call("isScriptLoaded", "macos_dock_tracker");
+    if (!reply.isValid() || !reply.value()) {
+        qDebug() << "[DockManager] Tracker script missing in KWin, reinstalling...";
+        setupKWinWindowTracker();
+    }
 }
 
 void DockManager::updateWindows(const QString &json) {
@@ -483,12 +579,32 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             QString appQuery = getAppQuery(appId);
             QStringList queries = appQuery.split("|");
 
-            bool isMatch = (appId == desktopFile || appId == resourceClass || appId == resourceName);
+            bool isMatch = false;
+
+            // Special case: WhatsApp Web running inside Chrome or browser
+            if (caption.contains("whatsapp", Qt::CaseInsensitive)) {
+                if (appId == "messages") {
+                    isMatch = true;
+                } else if (appId == "safari" || appId == "google-chrome") {
+                    isMatch = false; // Don't let browser steal WhatsApp
+                }
+            }
+
+            if (!isMatch) {
+                isMatch = (appId == desktopFile || appId == resourceClass || appId == resourceName);
+            }
+
             if (!isMatch) {
                 for (const QString &q : queries) {
-                    if (!q.isEmpty() && (desktopFile.contains(q) || resourceClass.contains(q) || resourceName.contains(q))) {
-                        isMatch = true;
-                        break;
+                    if (!q.isEmpty()) {
+                        if (desktopFile.contains(q) || resourceClass.contains(q) || resourceName.contains(q)) {
+                            // Don't match WhatsApp to browser
+                            if ((appId == "safari" || appId == "google-chrome") && caption.contains("whatsapp", Qt::CaseInsensitive)) {
+                                continue;
+                            }
+                            isMatch = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -540,10 +656,21 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             QString iconName = key;
             QString exec = key;
 
+            QString cleanKey = key;
+            if (cleanKey.endsWith(".desktop")) {
+                cleanKey.chop(8);
+            }
+
             // Search desktop files for real name & icon
-            QString desktopPath = "/usr/share/applications/" + key + ".desktop";
+            QString desktopPath = "/usr/share/applications/" + cleanKey + ".desktop";
             if (!QFile::exists(desktopPath)) {
-                desktopPath = QDir::homePath() + "/.local/share/applications/" + key + ".desktop";
+                desktopPath = QDir::homePath() + "/.local/share/applications/" + cleanKey + ".desktop";
+            }
+            if (!QFile::exists(desktopPath)) {
+                desktopPath = "/var/lib/flatpak/exports/share/applications/" + cleanKey + ".desktop";
+            }
+            if (!QFile::exists(desktopPath)) {
+                desktopPath = QDir::homePath() + "/.local/share/flatpak/exports/share/applications/" + cleanKey + ".desktop";
             }
 
             if (QFile::exists(desktopPath)) {

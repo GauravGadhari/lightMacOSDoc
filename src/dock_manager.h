@@ -69,6 +69,7 @@ public:
     Q_INVOKABLE void addAppFromText(const QString &text);
     Q_INVOKABLE void toggleDividerBefore(const QString &id);
     Q_INVOKABLE void resetToDefaultApps();
+    Q_INVOKABLE void cleanupKWinWindowTracker();
 
 public Q_SLOTS:
     void updateWindows(const QString &json);
@@ -91,12 +92,15 @@ private:
     QString resolveSystemIcon(const QString &iconName);
     QString getAppQuery(const QString &id);
     void setupKWinWindowTracker();
+    void checkTrackerHealth();
     void matchWindowsToApps(const QJsonArray &windowList);
+    bool executeKWinAction(const QString &scriptCode);
     bool runKWinScript(const QString &scriptCode, QString *outResult = nullptr);
 
     QList<QObject*> m_apps;
     QTimer *m_pollTimer = nullptr;
     QQuickWindow *m_window = nullptr;
+    int m_kwinTrackerScriptId = -1;
     bool m_isDarkTheme = true;
     bool m_isAutoHidden = false;
     bool m_isMenuOpen = false;
