@@ -152,6 +152,11 @@ Window {
                 root.dockVisible = true;
             }
         }
+        onPositionChanged: {
+            if (!root.dockVisible) {
+                root.dockVisible = true;
+            }
+        }
     }
 
     // ── Dock Content ──

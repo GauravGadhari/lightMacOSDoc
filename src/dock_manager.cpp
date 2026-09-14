@@ -1234,6 +1234,7 @@ void DockManager::setAutostartEnabled(bool enabled) {
                 "Terminal=false\n"
                 "StartupNotify=false\n"
                 "X-KDE-autostart-phase=2\n"
+                "X-KDE-Unique=true\n"
                 "X-GNOME-Autostart-enabled=true\n"
                 "Categories=Utility;\n";
             file.write(content.toUtf8());

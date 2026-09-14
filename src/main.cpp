@@ -3,6 +3,10 @@
 #include <QQmlContext>
 #include <QQuickWindow>
 #include <QDebug>
+#include <QLockFile>
+#include <QDir>
+#include <QSessionManager>
+#include <QThread>
 #include <csignal>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -25,6 +29,49 @@ int main(int argc, char *argv[]) {
     app.setApplicationName("macOS Dock");
     app.setOrganizationName("Antigravity");
     app.setWindowIcon(QIcon(":/icons/finder/256.png"));
+
+    // Prevent KDE Plasma Session Manager (ksmserver) from saving/restoring this process on logout/reboot
+    // because the dock is independently launched via autostart.
+    QObject::connect(&app, &QGuiApplication::saveStateRequest, [](QSessionManager &sm) {
+        sm.setRestartHint(QSessionManager::RestartNever);
+        sm.setRestartCommand(QStringList());
+    });
+    QObject::connect(&app, &QGuiApplication::commitDataRequest, [](QSessionManager &sm) {
+        sm.setRestartHint(QSessionManager::RestartNever);
+        sm.setRestartCommand(QStringList());
+    });
+
+    // ── Single-Instance Enforcement ──
+    QString lockPath = QDir::tempPath() + QStringLiteral("/macos-dock-%1.lock").arg(getuid());
+    QLockFile lockFile(lockPath);
+    lockFile.setStaleLockTime(0);
+
+    bool replace = app.arguments().contains(QStringLiteral("--replace"));
+
+    if (replace) {
+        qint64 existingPid = 0;
+        QString existingHost, existingApp;
+        if (lockFile.getLockInfo(&existingPid, &existingHost, &existingApp) && existingPid > 0) {
+            qInfo() << "[macOS Dock] Replacing existing dock process (PID:" << existingPid << ")";
+            kill(static_cast<pid_t>(existingPid), SIGTERM);
+            for (int i = 0; i < 20; ++i) {
+                if (kill(static_cast<pid_t>(existingPid), 0) != 0) break;
+                QThread::msleep(50);
+            }
+            if (kill(static_cast<pid_t>(existingPid), 0) == 0) {
+                kill(static_cast<pid_t>(existingPid), SIGKILL);
+                QThread::msleep(50);
+            }
+        }
+    }
+
+    if (!lockFile.tryLock(200)) {
+        qint64 runningPid = 0;
+        QString runningHost, runningApp;
+        lockFile.getLockInfo(&runningPid, &runningHost, &runningApp);
+        qWarning() << "[macOS Dock] Another instance of macOS Dock is already running (PID:" << runningPid << "). Exiting duplicate.";
+        return 0;
+    }
 
     // Safe Unix signal handling for SIGTERM and SIGINT
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, sigTermFd) == 0) {
