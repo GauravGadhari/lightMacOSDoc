@@ -158,6 +158,8 @@
         <file alias="icons/wallpapers/256.webp">assets/icons/wallpapers/256.webp</file>
         <file alias="icons/wallpapers/32.png">assets/icons/wallpapers/32.png</file>
         <file alias="icons/wallpapers/512.png">assets/icons/wallpapers/512.png</file>
+        <file alias="icons/antigravity/1024.png">assets/icons/antigravity/1024.png</file>
+        <file alias="icons/antigravity/512.png">assets/icons/antigravity/512.png</file>
         <file alias="icons/antigravity/256.png">assets/icons/antigravity/256.png</file>
         <file alias="icons/antigravity/128.png">assets/icons/antigravity/128.png</file>
         <file alias="icons/antigravity/64.png">assets/icons/antigravity/64.png</file>

@@ -348,21 +348,17 @@ QString DockManager::getAppQuery(const QString &id) {
     if (id == "safari") return "chrome|firefox|brave|chromium";
     if (id == "messages") return "whatsapp";
     if (id == "terminal") return "konsole|terminal|alacritty|kitty";
-    if (id == "vscode") return "code";
     if (id == "antigravity") return "antigravity";
     if (id == "system-preferences") return "systemsettings|control-center";
     if (id == "calculator") return "kcalc|calculator";
     if (id == "music") return "spotify|elisa|rhythmbox";
     if (id == "mail") return "thunderbird|kmail|mail.google.com|gmail";
     if (id == "maps") return "google maps|maps.google.com|maps";
-    if (id == "facetime") return "google meet|meet.google.com|meet";
-    if (id == "calendar") return "korganizer|gnome-calendar|calendar.google.com|calendar";
     if (id == "contacts") return "kaddressbook|gnome-contacts|contacts.google.com|contacts";
-    if (id == "reminders") return "tasks.google.com|reminders|tasks";
     if (id == "notes") return "kate|knotes|gedit";
     if (id == "photos") return "gwenview|eog|shotwell";
     if (id == "appstore") return "plasma-discover|discover";
-    if (id == "tv") return "vlc";
+    if (id == "tv") return "sonyliv|sony liv|vlc";
     return id;
 }
 
@@ -605,29 +601,17 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
                 } else if (appId == "safari" || appId == "google-chrome") {
                     isMatch = false;
                 }
-            } else if (caption.contains("google calendar", Qt::CaseInsensitive) || caption.contains("calendar.google.com", Qt::CaseInsensitive)) {
-                if (appId == "calendar") {
-                    isMatch = true;
-                } else if (appId == "safari" || appId == "google-chrome") {
-                    isMatch = false;
-                }
             } else if (caption.contains("google contacts", Qt::CaseInsensitive) || caption.contains("contacts.google.com", Qt::CaseInsensitive)) {
                 if (appId == "contacts") {
                     isMatch = true;
                 } else if (appId == "safari" || appId == "google-chrome") {
                     isMatch = false;
                 }
-            } else if (caption.contains("google tasks", Qt::CaseInsensitive) || caption.contains("tasks.google.com", Qt::CaseInsensitive)) {
-                if (appId == "reminders") {
+            } else if (caption.contains("sonyliv", Qt::CaseInsensitive) || caption.contains("sony liv", Qt::CaseInsensitive)) {
+                if (appId == "tv") {
                     isMatch = true;
                 } else if (appId == "safari" || appId == "google-chrome") {
-                    isMatch = false;
-                }
-            } else if (caption.contains("google meet", Qt::CaseInsensitive) || caption.contains("meet.google.com", Qt::CaseInsensitive)) {
-                if (appId == "facetime") {
-                    isMatch = true;
-                } else if (appId == "safari" || appId == "google-chrome") {
-                    isMatch = false;
+                    isMatch = false; // Don't let browser steal Sony LIV
                 }
             }
 
@@ -646,10 +630,9 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
                                     caption.contains("mail.google.com", Qt::CaseInsensitive) ||
                                     caption.contains("google maps", Qt::CaseInsensitive) ||
                                     caption.contains("maps.google.com", Qt::CaseInsensitive) ||
-                                    caption.contains("calendar.google.com", Qt::CaseInsensitive) ||
                                     caption.contains("contacts.google.com", Qt::CaseInsensitive) ||
-                                    caption.contains("tasks.google.com", Qt::CaseInsensitive) ||
-                                    caption.contains("meet.google.com", Qt::CaseInsensitive)) {
+                                    caption.contains("sonyliv", Qt::CaseInsensitive) ||
+                                    caption.contains("sony liv", Qt::CaseInsensitive)) {
                                     continue;
                                 }
                             }
@@ -930,18 +913,14 @@ void DockManager::initDefaultApps() {
         {"mail", "Mail", "qrc:/icons/mail/256.png", "google-chrome --app=https://mail.google.com || firefox --new-window https://mail.google.com || thunderbird || xdg-open https://mail.google.com", false},
         {"maps", "Maps", "qrc:/icons/maps/256.png", "google-chrome --app=https://maps.google.com || xdg-open https://maps.google.com", false},
         {"photos", "Photos", "qrc:/icons/photos/256.png", "gwenview || eog || shotwell || xdg-open ~/Pictures", false},
-        {"facetime", "FaceTime", "qrc:/icons/facetime/256.png", "google-chrome --app=https://meet.google.com || xdg-open https://meet.google.com", false},
-        {"calendar", "Calendar", "qrc:/icons/calendar/256.png", "korganizer || gnome-calendar || google-chrome --app=https://calendar.google.com || xdg-open https://calendar.google.com", false},
         {"contacts", "Contacts", "qrc:/icons/contacts/256.png", "kaddressbook || gnome-contacts || google-chrome --app=https://contacts.google.com", false},
-        {"reminders", "Reminders", "qrc:/icons/reminders/256.png", "google-chrome --app=https://tasks.google.com || xdg-open https://tasks.google.com", false},
         {"notes", "Notes", "qrc:/icons/notes/256.png", "kate || knotes || gedit", false},
         {"music", "Music", "qrc:/icons/music/256.png", "elisa || spotify || rhythmbox || google-chrome --app=https://music.youtube.com || xdg-open https://music.youtube.com", false},
         {"podcasts", "Podcasts", "qrc:/icons/podcasts/256.png", "google-chrome --app=https://podcasts.google.com", false},
-        {"tv", "TV", "qrc:/icons/tv/256.png", "vlc || xdg-open https://tv.apple.com", false},
+        {"tv", "TV", "qrc:/icons/tv/256.png", "google-chrome --app=https://www.sonyliv.com || firefox --new-window https://www.sonyliv.com || xdg-open https://www.sonyliv.com", false},
         {"appstore", "App Store", "qrc:/icons/appstore/256.png", "plasma-discover || discover || gnome-software", false},
         {"system-preferences", "System Settings", "qrc:/icons/system-preferences/256.png", "systemsettings || gnome-control-center", false},
-        {"vscode", "VS Code", "qrc:/icons/vscode/256.png", "code", false},
-        {"antigravity", "Antigravity", "qrc:/icons/antigravity/256.png", "/opt/antigravity/antigravity --no-sandbox || /usr/local/bin/antigravity", false},
+        {"antigravity", "Antigravity", "qrc:/icons/antigravity/256.png", "/home/gaurav/.local/bin/antigravity-ide || /opt/antigravity/antigravity --no-sandbox || antigravity", false},
         {"terminal", "Terminal", "qrc:/icons/terminal/256.png", "konsole || gnome-terminal || alacritty || x-terminal-emulator || kitty", false},
         {"calculator", "Calculator", "qrc:/icons/calculator/256.png", "kcalc || gnome-calculator", false},
         {"wallpapers", "Wallpapers", "qrc:/icons/wallpapers/256.png", "systemsettings kcm_desktoptheme || xdg-open /usr/share/wallpapers", true},
