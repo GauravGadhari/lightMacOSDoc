@@ -100,22 +100,6 @@ Window {
         }
     }
 
-    // ── Menu Idle Dismiss Timer ──
-    // If a menu is open and the mouse is outside the dock container for > 3.5s,
-    // automatically dismiss the menu and allow dock to auto-hide.
-    Timer {
-        id: menuIdleDismissTimer
-        interval: 3500
-        repeat: false
-        onTriggered: {
-            if (!dockContainer.isMouseInside && dockManager.isMenuOpen) {
-                dockManager.dismissAllMenus();
-                if (root.dockVisible) {
-                    autoHideTimer.restart();
-                }
-            }
-        }
-    }
 
     // ── State Transitions ──
     onDockVisibleChanged: {
@@ -179,15 +163,12 @@ Window {
 
         onIsMouseInsideChanged: {
             if (isMouseInside) {
-                menuIdleDismissTimer.stop();
                 autoHideTimer.stop();
                 if (!root.dockVisible) {
                     root.dockVisible = true;
                 }
             } else {
-                if (dockManager.isMenuOpen) {
-                    menuIdleDismissTimer.restart();
-                } else if (root.dockVisible) {
+                if (!dockManager.isMenuOpen && root.dockVisible) {
                     autoHideTimer.restart();
                 }
             }
@@ -198,12 +179,7 @@ Window {
     Connections {
         target: dockManager
         function onIsMenuOpenChanged() {
-            if (dockManager.isMenuOpen) {
-                if (!dockContainer.isMouseInside) {
-                    menuIdleDismissTimer.restart();
-                }
-            } else {
-                menuIdleDismissTimer.stop();
+            if (!dockManager.isMenuOpen) {
                 if (!dockContainer.isMouseInside && root.dockVisible) {
                     autoHideTimer.restart();
                 }

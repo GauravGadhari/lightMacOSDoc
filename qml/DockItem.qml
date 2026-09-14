@@ -150,7 +150,7 @@ Item {
         id: tooltip
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.isMarkedForRemoval ? "Remove from Dock" : (appData ? appData.title : "")
-        visibleTooltip: root.isHovered || root.isDragging
+        visibleTooltip: (root.isHovered || root.isDragging) && !contextMenu.visible && !dockManager.isMenuOpen
         z: 300
     }
 
@@ -315,7 +315,7 @@ Item {
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) {
                 dockManager.dismissAllMenus();
-                contextMenu.popup();
+                contextMenu.popup(mouse.x, mouse.y);
             }
         }
     }
@@ -323,6 +323,12 @@ Item {
     function closeAllMenus() {
         if (contextMenu.visible) {
             contextMenu.close();
+        }
+        if (optionsMenu.visible) {
+            optionsMenu.close();
+        }
+        if (dockSettingsMenu.visible) {
+            dockSettingsMenu.close();
         }
     }
 
@@ -345,17 +351,124 @@ Item {
         }
     }
 
+    // ── Apple-grade Native Context Menu Components ──
+    component MacMenuItem: MenuItem {
+        id: itemControl
+        implicitWidth: 220
+        implicitHeight: visible ? 26 : 0
+
+        contentItem: Item {
+            anchors.fill: parent
+            visible: itemControl.visible
+
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.right: (itemControl.subMenu !== null) ? arrowText.left : parent.right
+                anchors.rightMargin: (itemControl.subMenu !== null) ? 4 : 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: itemControl.text
+                font.pixelSize: 13
+                font.family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                color: !itemControl.enabled 
+                    ? (dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.35) : Qt.rgba(0, 0, 0, 0.32))
+                    : (itemControl.highlighted ? "#FFFFFF" : (dockManager.isDarkTheme ? "#ECECED" : "#1D1D1F"))
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+
+            Text {
+                id: arrowText
+                visible: itemControl.subMenu !== null
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: "›"
+                font.pixelSize: 16
+                font.bold: true
+                color: itemControl.highlighted ? "#FFFFFF" : (dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.5) : Qt.rgba(0, 0, 0, 0.4))
+            }
+        }
+
+        background: Rectangle {
+            visible: itemControl.visible && itemControl.highlighted
+            radius: 5
+            color: dockManager.isDarkTheme ? "#0A84FF" : "#007AFF"
+            anchors.fill: parent
+            anchors.leftMargin: 4
+            anchors.rightMargin: 4
+        }
+    }
+
+    component MacMenuSeparator: MenuSeparator {
+        id: sepControl
+        implicitWidth: 220
+        implicitHeight: visible ? 7 : 0
+        topPadding: visible ? 3 : 0
+        bottomPadding: visible ? 3 : 0
+        leftPadding: 10
+        rightPadding: 10
+
+        contentItem: Rectangle {
+            visible: sepControl.visible
+            implicitHeight: visible ? 1 : 0
+            height: visible ? 1 : 0
+            color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.15) : Qt.rgba(0, 0, 0, 0.12)
+        }
+
+        background: Item {
+            visible: false
+        }
+    }
+
+    component MacMenu: Menu {
+        id: menuControl
+        popupType: Popup.Window
+        delegate: MacMenuItem {}
+
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside | Popup.CloseOnPressOutsideParent
+
+        topPadding: 5
+        bottomPadding: 5
+        leftPadding: 5
+        rightPadding: 5
+
+        background: Rectangle {
+            implicitWidth: 220
+            radius: 8
+            color: dockManager.isDarkTheme 
+                ? Qt.rgba(0.14, 0.14, 0.16, 0.96) 
+                : Qt.rgba(0.96, 0.96, 0.98, 0.96)
+            border.color: dockManager.isDarkTheme 
+                ? Qt.rgba(1, 1, 1, 0.18) 
+                : Qt.rgba(0, 0, 0, 0.15)
+            border.width: 1
+        }
+
+        contentItem: ListView {
+            implicitHeight: contentHeight
+            model: menuControl.contentModel
+            currentIndex: menuControl.currentIndex
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AlwaysOff
+                visible: false
+            }
+        }
+    }
+
     // macOS Context Menu
-    Menu {
+    MacMenu {
         id: contextMenu
 
-        onOpened: dockManager.isMenuOpen = true
-        onClosed: dockManager.isMenuOpen = false
+        onOpened: dockManager.setIsMenuOpen(true)
+        onClosed: dockManager.setIsMenuOpen(false)
 
         // 1. Open Windows List
         Repeater {
             model: (appData && appData.windows) ? appData.windows : []
-            MenuItem {
+            MacMenuItem {
                 required property var modelData
                 text: (modelData.active ? "✓ " : "   ") + (modelData.title ? (modelData.title.length > 35 ? modelData.title.substring(0, 32) + "..." : modelData.title) : "Window")
                 onTriggered: {
@@ -365,12 +478,12 @@ Item {
             }
         }
 
-        MenuSeparator {
+        MacMenuSeparator {
             visible: appData ? (appData.windowCount > 0) : false
         }
 
         // 2. Open / Show
-        MenuItem {
+        MacMenuItem {
             visible: appData ? (!appData.isRunning || appData.windowCount === 0) : true
             text: (appData && appData.isRunning) ? ("Show " + appData.title) : ("Open " + (appData ? appData.title : ""))
             onTriggered: {
@@ -382,7 +495,7 @@ Item {
         }
 
         // 3. New Window
-        MenuItem {
+        MacMenuItem {
             text: "New Window"
             onTriggered: {
                 dockManager.dismissAllMenus();
@@ -394,7 +507,7 @@ Item {
         }
 
         // 4. Close Window (Single window open)
-        MenuItem {
+        MacMenuItem {
             visible: appData ? (appData.windowCount === 1) : false
             text: "Close Window"
             onTriggered: {
@@ -404,7 +517,7 @@ Item {
         }
 
         // 5. Close All Windows (Multiple windows open)
-        MenuItem {
+        MacMenuItem {
             visible: appData ? (appData.windowCount > 1) : false
             text: "Close All Windows"
             onTriggered: {
@@ -414,7 +527,7 @@ Item {
         }
 
         // 6. Show All Windows (App Exposé)
-        MenuItem {
+        MacMenuItem {
             visible: appData ? (appData.windowCount > 0) : false
             text: "Show All Windows"
             onTriggered: {
@@ -423,16 +536,16 @@ Item {
             }
         }
 
-        MenuSeparator {
+        MacMenuSeparator {
             visible: appData ? appData.isRunning : false
         }
 
         // 7. Options Submenu
-        Menu {
+        MacMenu {
             id: optionsMenu
             title: "Options"
 
-            MenuItem {
+            MacMenuItem {
                 text: (appData && appData.isPinned ? "✓ " : "   ") + "Keep in Dock"
                 onTriggered: {
                     if (appData) {
@@ -445,7 +558,7 @@ Item {
                 }
             }
 
-            MenuItem {
+            MacMenuItem {
                 visible: appData ? appData.isPinned : false
                 text: "Remove from Dock"
                 onTriggered: {
@@ -453,35 +566,37 @@ Item {
                 }
             }
 
-            MenuItem {
+            MacMenuItem {
                 text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
                 onTriggered: dockManager.toggleAutostart()
             }
 
-            MenuSeparator {}
+            MacMenuSeparator {}
 
-            MenuItem {
+            MacMenuItem {
                 text: "Move Left"
                 enabled: root.itemIndex > 0
                 onTriggered: dockManager.moveApp(root.itemIndex, root.itemIndex - 1)
             }
 
-            MenuItem {
+            MacMenuItem {
                 text: "Move Right"
                 enabled: root.itemIndex < (dockManager.apps.length - 1)
                 onTriggered: dockManager.moveApp(root.itemIndex, root.itemIndex + 1)
             }
 
-            MenuItem {
+            MacMenuItem {
                 text: (appData && appData.dockBreaksBefore) ? "Remove Divider Before" : "Add Divider Before"
                 onTriggered: { if (appData) dockManager.toggleDividerBefore(appData.id); }
             }
         }
 
-        MenuSeparator {}
+        MacMenuSeparator {
+            visible: appData ? appData.isRunning : false
+        }
 
         // 8. Hide
-        MenuItem {
+        MacMenuItem {
             visible: appData ? appData.isRunning : false
             text: "Hide"
             onTriggered: {
@@ -491,7 +606,7 @@ Item {
         }
 
         // 9. Quit App
-        MenuItem {
+        MacMenuItem {
             visible: appData ? appData.isRunning : false
             text: "Quit " + (appData ? appData.title : "")
             onTriggered: {
@@ -500,26 +615,26 @@ Item {
             }
         }
 
-        MenuSeparator {}
+        MacMenuSeparator {}
 
         // 10. Dock Settings Submenu
-        Menu {
+        MacMenu {
             id: dockSettingsMenu
             title: "Dock Settings"
 
-            MenuItem {
+            MacMenuItem {
                 text: dockManager.isDarkTheme ? "Switch to Light Theme" : "Switch to Dark Theme"
                 onTriggered: dockManager.isDarkTheme = !dockManager.isDarkTheme
             }
 
-            MenuItem {
+            MacMenuItem {
                 text: "Reset All Apps to Default"
                 onTriggered: dockManager.resetToDefaultApps()
             }
 
-            MenuSeparator {}
+            MacMenuSeparator {}
 
-            MenuItem {
+            MacMenuItem {
                 text: "Quit macOS Dock"
                 onTriggered: dockManager.quitDock()
             }

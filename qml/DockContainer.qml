@@ -192,7 +192,9 @@ Item {
 
         onClicked: (mouse) => {
             if (mouse.button === Qt.RightButton) {
-                pillContextMenu.popup();
+                dockManager.dismissAllMenus();
+                var pt = mapToItem(root, mouse.x, mouse.y);
+                pillContextMenu.popup(pt.x, pt.y);
             }
         }
     }
@@ -299,31 +301,147 @@ Item {
         }
     }
 
+    Connections {
+        target: dockManager
+        function onDismissPopupsRequested() {
+            if (pillContextMenu.visible) {
+                pillContextMenu.close();
+            }
+        }
+    }
+
+    // ── Apple-grade Native Context Menu Components ──
+    component MacMenuItem: MenuItem {
+        id: itemControl
+        implicitWidth: 220
+        implicitHeight: visible ? 26 : 0
+
+        contentItem: Item {
+            anchors.fill: parent
+            visible: itemControl.visible
+
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.right: (itemControl.subMenu !== null) ? arrowText.left : parent.right
+                anchors.rightMargin: (itemControl.subMenu !== null) ? 4 : 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: itemControl.text
+                font.pixelSize: 13
+                font.family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                color: !itemControl.enabled 
+                    ? (dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.35) : Qt.rgba(0, 0, 0, 0.32))
+                    : (itemControl.highlighted ? "#FFFFFF" : (dockManager.isDarkTheme ? "#ECECED" : "#1D1D1F"))
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+            }
+
+            Text {
+                id: arrowText
+                visible: itemControl.subMenu !== null
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: "›"
+                font.pixelSize: 16
+                font.bold: true
+                color: itemControl.highlighted ? "#FFFFFF" : (dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.5) : Qt.rgba(0, 0, 0, 0.4))
+            }
+        }
+
+        background: Rectangle {
+            visible: itemControl.visible && itemControl.highlighted
+            radius: 5
+            color: dockManager.isDarkTheme ? "#0A84FF" : "#007AFF"
+            anchors.fill: parent
+            anchors.leftMargin: 4
+            anchors.rightMargin: 4
+        }
+    }
+
+    component MacMenuSeparator: MenuSeparator {
+        id: sepControl
+        implicitWidth: 220
+        implicitHeight: visible ? 7 : 0
+        topPadding: visible ? 3 : 0
+        bottomPadding: visible ? 3 : 0
+        leftPadding: 10
+        rightPadding: 10
+
+        contentItem: Rectangle {
+            visible: sepControl.visible
+            implicitHeight: visible ? 1 : 0
+            height: visible ? 1 : 0
+            color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.15) : Qt.rgba(0, 0, 0, 0.12)
+        }
+
+        background: Item {
+            visible: false
+        }
+    }
+
+    component MacMenu: Menu {
+        id: menuControl
+        popupType: Popup.Window
+        delegate: MacMenuItem {}
+
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside | Popup.CloseOnPressOutsideParent
+
+        topPadding: 5
+        bottomPadding: 5
+        leftPadding: 5
+        rightPadding: 5
+
+        background: Rectangle {
+            implicitWidth: 220
+            radius: 8
+            color: dockManager.isDarkTheme 
+                ? Qt.rgba(0.14, 0.14, 0.16, 0.96) 
+                : Qt.rgba(0.96, 0.96, 0.98, 0.96)
+            border.color: dockManager.isDarkTheme 
+                ? Qt.rgba(1, 1, 1, 0.18) 
+                : Qt.rgba(0, 0, 0, 0.15)
+            border.width: 1
+        }
+
+        contentItem: ListView {
+            implicitHeight: contentHeight
+            model: menuControl.contentModel
+            currentIndex: menuControl.currentIndex
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AlwaysOff
+                visible: false
+            }
+        }
+    }
+
     // Context Menu for Pill Background
-    Menu {
+    MacMenu {
         id: pillContextMenu
 
         onOpened: dockManager.setIsMenuOpen(true)
         onClosed: dockManager.setIsMenuOpen(false)
 
-        MenuItem {
+        MacMenuItem {
             text: dockManager.isDarkTheme ? "Switch to Light Theme" : "Switch to Dark Theme"
             onTriggered: dockManager.isDarkTheme = !dockManager.isDarkTheme
         }
 
-        MenuItem {
+        MacMenuItem {
             text: "Reset All Apps to Default"
             onTriggered: dockManager.resetToDefaultApps()
         }
 
-        MenuItem {
+        MacMenuItem {
             text: (dockManager.isAutostartEnabled ? "✓ " : "   ") + "Open at Login"
             onTriggered: dockManager.toggleAutostart()
         }
 
-        MenuSeparator {}
+        MacMenuSeparator {}
 
-        MenuItem {
+        MacMenuItem {
             text: "Quit macOS Dock"
             onTriggered: dockManager.quitDock()
         }
