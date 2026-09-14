@@ -52,20 +52,6 @@ public:
     Q_INVOKABLE void resetMask();
     Q_INVOKABLE void setAutoHidden(bool hidden);
 
-    Q_INVOKABLE void launchOrToggleApp(const QString &id);
-    Q_INVOKABLE void launchNewInstance(const QString &id);
-    Q_INVOKABLE void minimizeApp(const QString &id);
-    Q_INVOKABLE void closeApp(const QString &id);
-    Q_INVOKABLE void activateWindow(const QString &windowId);
-    Q_INVOKABLE void closeWindowById(const QString &windowId);
-    Q_INVOKABLE void pinApp(const QString &id);
-    Q_INVOKABLE void unpinApp(const QString &id);
-    Q_INVOKABLE void showAllWindows(const QString &id);
-    Q_INVOKABLE void dismissAllMenus();
-    Q_INVOKABLE void launchCommand(const QString &command);
-    Q_INVOKABLE void quitDock();
-    Q_INVOKABLE void refreshRunningStatus();
-
     // ── Customization & Management ──
     Q_INVOKABLE void moveApp(int fromIndex, int toIndex);
     Q_INVOKABLE void removeApp(int index);
@@ -79,6 +65,19 @@ public:
 
 public Q_SLOTS:
     void updateWindows(const QString &json);
+    void launchOrToggleApp(const QString &id);
+    void launchNewInstance(const QString &id);
+    void minimizeApp(const QString &id);
+    void closeApp(const QString &id);
+    void activateWindow(const QString &windowId);
+    void closeWindowById(const QString &windowId);
+    void pinApp(const QString &id);
+    void unpinApp(const QString &id);
+    void showAllWindows(const QString &id);
+    void dismissAllMenus();
+    void launchCommand(const QString &command);
+    void quitDock();
+    void refreshRunningStatus();
 
 signals:
     void appsChanged();

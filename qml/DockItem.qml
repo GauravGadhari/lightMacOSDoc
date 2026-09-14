@@ -114,6 +114,11 @@ Item {
                 stopContinuousJump();
             }
         }
+        function onWindowsChanged() {
+            if (appData && appData.windowCount > 0 && isLaunching) {
+                stopContinuousJump();
+            }
+        }
         function onIsRunningChanged() {
             if (appData && appData.isRunning && isLaunching) {
                 stopContinuousJump();
