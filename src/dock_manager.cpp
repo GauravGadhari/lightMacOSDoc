@@ -16,6 +16,8 @@
 #include <QSet>
 
 DockManager::DockManager(QObject *parent) : QObject(parent) {
+    m_appModel = new AppListModel(this);
+
     if (!loadApps()) {
         initDefaultApps();
         saveApps();
@@ -38,8 +40,23 @@ DockManager::DockManager(QObject *parent) : QObject(parent) {
 
 DockManager::~DockManager() {
     cleanupKWinWindowTracker();
-    qDeleteAll(m_apps);
-    m_apps.clear();
+    if (m_appModel) {
+        m_appModel->clear();
+    }
+}
+
+QList<QObject*> DockManager::apps() const {
+    QList<QObject*> list;
+    if (m_appModel) {
+        for (AppItem *item : m_appModel->items()) {
+            list.append(item);
+        }
+    }
+    return list;
+}
+
+int DockManager::appCount() const {
+    return m_appModel ? m_appModel->size() : 0;
 }
 
 void DockManager::setWindow(QQuickWindow *win) {
@@ -102,8 +119,7 @@ QString DockManager::configFilePath() const {
 
 void DockManager::saveApps() {
     QJsonArray array;
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         // ONLY persist pinned apps that are not being removed
         if (item && item->isPinned() && !item->isRemoving()) {
             array.append(item->toJson());
@@ -132,41 +148,42 @@ bool DockManager::loadApps() {
     QJsonArray array = doc.array();
     if (array.isEmpty()) return false;
 
-    qDeleteAll(m_apps);
-    m_apps.clear();
+    m_appModel->clear();
 
     for (const QJsonValue &val : array) {
         if (val.isObject()) {
             AppItem *item = AppItem::fromJson(val.toObject(), this);
             if (item) {
-                m_apps.append(item);
+                m_appModel->append(item);
             }
         }
     }
 
     emit appsChanged();
-    return !m_apps.isEmpty();
+    return !m_appModel->isEmpty();
 }
 
 void DockManager::resetToDefaultApps() {
+    m_appModel->clear();
     initDefaultApps();
     saveApps();
+    emit appsChanged();
 }
 
 void DockManager::moveApp(int fromIndex, int toIndex) {
-    if (fromIndex < 0 || fromIndex >= m_apps.size() || toIndex < 0 || toIndex >= m_apps.size() || fromIndex == toIndex) {
+    if (fromIndex < 0 || fromIndex >= m_appModel->size() || toIndex < 0 || toIndex >= m_appModel->size() || fromIndex == toIndex) {
         return;
     }
 
-    m_apps.move(fromIndex, toIndex);
+    m_appModel->move(fromIndex, toIndex);
     emit appsChanged();
     saveApps();
 }
 
 void DockManager::removeApp(int index) {
-    if (index < 0 || index >= m_apps.size()) return;
+    if (index < 0 || index >= m_appModel->size()) return;
 
-    auto *item = qobject_cast<AppItem*>(m_apps.at(index));
+    auto *item = m_appModel->at(index);
     if (item) {
         item->setIsRemoving(true);
         // QML morph-out animation will call finalizeRemoveApp when done
@@ -174,8 +191,7 @@ void DockManager::removeApp(int index) {
 }
 
 void DockManager::removeAppById(const QString &id) {
-    for (int i = 0; i < m_apps.size(); ++i) {
-        auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id) {
             item->setIsRemoving(true);
             return;
@@ -184,21 +200,20 @@ void DockManager::removeAppById(const QString &id) {
 }
 
 void DockManager::finalizeRemoveApp(const QString &id) {
-    for (int i = 0; i < m_apps.size(); ++i) {
-        auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+    for (int i = 0; i < m_appModel->size(); ++i) {
+        auto *item = m_appModel->at(i);
         if (item && item->id() == id) {
-            m_apps.removeAt(i);
-            emit appsChanged();
+            m_appModel->removeAt(i);
             item->deleteLater();
             saveApps();
+            emit appsChanged();
             return;
         }
     }
 }
 
 void DockManager::pinApp(const QString &id) {
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id) {
             // Cancel any in-progress removal if user pins the app
             if (item->isRemoving()) {
@@ -213,8 +228,8 @@ void DockManager::pinApp(const QString &id) {
 }
 
 void DockManager::unpinApp(const QString &id) {
-    for (int i = 0; i < m_apps.size(); ++i) {
-        auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+    for (int i = 0; i < m_appModel->size(); ++i) {
+        auto *item = m_appModel->at(i);
         if (item && item->id() == id) {
             if (item->windowCount() > 0) {
                 item->setIsPinned(false);
@@ -230,8 +245,7 @@ void DockManager::unpinApp(const QString &id) {
 }
 
 void DockManager::showAllWindows(const QString &id) {
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id && item->windowCount() > 0) {
             QVariantMap win = item->windows().first().toMap();
             activateWindow(win.value("id").toString());
@@ -246,8 +260,7 @@ void DockManager::showAllWindows(const QString &id) {
 }
 
 void DockManager::toggleDividerBefore(const QString &id) {
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id) {
             item->setDockBreaksBefore(!item->dockBreaksBefore());
             saveApps();
@@ -262,8 +275,7 @@ void DockManager::addApp(const QString &id, const QString &title, const QString 
     bool exists = true;
     while (exists) {
         exists = false;
-        for (QObject *obj : m_apps) {
-            auto *item = qobject_cast<AppItem*>(obj);
+        for (AppItem *item : m_appModel->items()) {
             if (item && item->id() == uniqueId) {
                 exists = true;
                 uniqueId = QString("%1_%2").arg(id).arg(counter++);
@@ -273,7 +285,7 @@ void DockManager::addApp(const QString &id, const QString &title, const QString 
     }
 
     auto *item = new AppItem(uniqueId, title, icon, execCommand, dockBreaksBefore, false, true, this);
-    m_apps.append(item);
+    m_appModel->append(item);
     emit appsChanged();
     saveApps();
 }
@@ -638,8 +650,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
 
     // Map of AppItem* -> QVariantList of window maps
     QMap<AppItem*, QVariantList> appWindows;
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item) {
             appWindows[item] = QVariantList();
         }
@@ -687,8 +698,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
         bool matched = false;
 
         // Try to match against existing app items in dock
-        for (QObject *appObj : m_apps) {
-            auto *item = qobject_cast<AppItem*>(appObj);
+        for (AppItem *item : m_appModel->items()) {
             if (!item) continue;
 
             QString appId = item->id().toLower();
@@ -819,8 +829,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
 
         // Check if an unpinned item already exists for this key
         AppItem *targetItem = nullptr;
-        for (QObject *obj : m_apps) {
-            auto *item = qobject_cast<AppItem*>(obj);
+        for (AppItem *item : m_appModel->items()) {
             if (item && item->id() == key) {
                 targetItem = item;
                 // Cancel any in-progress removal — app has windows again
@@ -878,17 +887,17 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
 
             // In macOS, running unpinned apps appear on the left of the divider (before files/trash)
             int insertIndex = -1;
-            for (int i = 0; i < m_apps.size(); ++i) {
-                auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+            for (int i = 0; i < m_appModel->size(); ++i) {
+                auto *item = m_appModel->at(i);
                 if (item && item->dockBreaksBefore()) {
                     insertIndex = i;
                     break;
                 }
             }
             if (insertIndex >= 0) {
-                m_apps.insert(insertIndex, targetItem);
+                m_appModel->insert(insertIndex, targetItem);
             } else {
-                m_apps.append(targetItem);
+                m_appModel->append(targetItem);
             }
             structureChanged = true;
         }
@@ -911,8 +920,8 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
     }
 
     // Clean up unpinned apps with 0 windows or blacklisted apps
-    for (int i = m_apps.size() - 1; i >= 0; --i) {
-        auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+    for (int i = m_appModel->size() - 1; i >= 0; --i) {
+        auto *item = m_appModel->at(i);
         if (item && !item->isPinned()) {
             QString idLower = item->id().toLower();
             bool isBlacklisted = idLower.contains("macos-dock") || idLower == "macos dock" ||
@@ -921,7 +930,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
 
             if (isBlacklisted) {
                 // Force-remove blacklisted apps instantly (they should never appear)
-                m_apps.removeAt(i);
+                m_appModel->removeAt(i);
                 item->deleteLater();
                 structureChanged = true;
             } else if (item->windowCount() == 0 && !item->isRemoving()) {
@@ -930,7 +939,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             } else if (item->isRemoving() && item->removingElapsedMs() > 4000) {
                 // Safety fallback: if animation didn't complete in 4 seconds, force remove
                 qDebug() << "[DockManager] Safety fallback: force removing stuck item" << item->id();
-                m_apps.removeAt(i);
+                m_appModel->removeAt(i);
                 item->deleteLater();
                 structureChanged = true;
             }
@@ -944,8 +953,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
 
 void DockManager::activateWindow(const QString &windowId) {
     // Immediately update local active state across apps for instant UI response and multi-window cycling
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (!item) continue;
         QVariantList wList = item->windows();
         bool changed = false;
@@ -995,10 +1003,9 @@ void DockManager::closeWindowById(const QString &windowId) {
 }
 
 void DockManager::launchOrToggleApp(const QString &id) {
-    // Find the app in m_apps
+    // Find the app in m_appModel
     AppItem *targetApp = nullptr;
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id) {
             targetApp = item;
             break;
@@ -1080,8 +1087,7 @@ void DockManager::launchNewInstance(const QString &id) {
         }
     });
 
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id) {
             launchCommand(item->execCommand());
             return;
@@ -1091,8 +1097,7 @@ void DockManager::launchNewInstance(const QString &id) {
 
 void DockManager::minimizeApp(const QString &id) {
     AppItem *targetApp = nullptr;
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id) {
             targetApp = item;
             break;
@@ -1150,8 +1155,7 @@ void DockManager::minimizeApp(const QString &id) {
 
 void DockManager::closeApp(const QString &id) {
     AppItem *targetApp = nullptr;
-    for (QObject *obj : m_apps) {
-        auto *item = qobject_cast<AppItem*>(obj);
+    for (AppItem *item : m_appModel->items()) {
         if (item && item->id() == id) {
             targetApp = item;
             break;
@@ -1199,8 +1203,7 @@ void DockManager::closeApp(const QString &id) {
 }
 
 void DockManager::initDefaultApps() {
-    qDeleteAll(m_apps);
-    m_apps.clear();
+    m_appModel->clear();
 
     struct AppDef {
         QString id;
@@ -1232,7 +1235,7 @@ void DockManager::initDefaultApps() {
 
     for (const auto &item : defaultList) {
         auto *app = new AppItem(item.id, item.title, item.icon, item.execCommand, item.dockBreaksBefore, false, true, this);
-        m_apps.append(app);
+        m_appModel->append(app);
     }
 
     emit appsChanged();

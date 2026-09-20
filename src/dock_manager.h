@@ -14,12 +14,15 @@
 #include <QVariantList>
 #include <QSet>
 #include "app_item.h"
+#include "app_list_model.h"
 
 class DockManager : public QObject {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.kde.MacOSDock")
 
+    Q_PROPERTY(QAbstractItemModel* appsModel READ appsModel CONSTANT)
     Q_PROPERTY(QList<QObject*> apps READ apps NOTIFY appsChanged)
+    Q_PROPERTY(int appCount READ appCount NOTIFY appsChanged)
     Q_PROPERTY(bool isDarkTheme READ isDarkTheme WRITE setIsDarkTheme NOTIFY isDarkThemeChanged)
     Q_PROPERTY(bool isAutostartEnabled READ isAutostartEnabled WRITE setAutostartEnabled NOTIFY autostartEnabledChanged)
     Q_PROPERTY(double baseIconWidth READ baseIconWidth WRITE setBaseIconWidth NOTIFY baseIconWidthChanged)
@@ -31,7 +34,9 @@ public:
     explicit DockManager(QObject *parent = nullptr);
     ~DockManager() override;
 
-    QList<QObject*> apps() const { return m_apps; }
+    QAbstractItemModel* appsModel() const { return m_appModel; }
+    QList<QObject*> apps() const;
+    int appCount() const;
     bool isDarkTheme() const { return m_isDarkTheme; }
     bool isAutostartEnabled() const;
     double baseIconWidth() const { return m_baseIconWidth; }
@@ -108,7 +113,7 @@ private:
     bool executeKWinAction(const QString &scriptCode);
     bool runKWinScript(const QString &scriptCode, QString *outResult = nullptr);
 
-    QList<QObject*> m_apps;
+    AppListModel *m_appModel = nullptr;
     QSet<QString> m_launchingAppIds;
     QTimer *m_pollTimer = nullptr;
     QQuickWindow *m_window = nullptr;

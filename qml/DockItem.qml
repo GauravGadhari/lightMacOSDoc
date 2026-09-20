@@ -29,6 +29,12 @@ Item {
     height: currentWidth
     clip: false
 
+    onWidthChanged: {
+        if (dockContainerRef && dockContainerRef.itemsRowRef) {
+            dockContainerRef.itemsRowRef.forceLayout();
+        }
+    }
+
     property bool isLaunching: false
 
     // ── Single jump (loops: 1) for switching / focusing an already running app ──
@@ -211,22 +217,18 @@ Item {
         clip: false
         transformOrigin: Item.Bottom
 
-        opacity: {
-            var base = root.isMarkedForRemoval ? 0.45 : (root.isDragging ? 0.8 : 1.0);
-            return base * Math.min(1.0, root.morphProgress * 3.0);  // fade in fast over first 33%
-        }
-        scale: {
-            var base = root.isMarkedForRemoval ? 0.8 : 1.0;
-            return base * Math.max(0.01, root.morphProgress);
-        }
+        property real removalScale: root.isMarkedForRemoval ? 0.8 : 1.0
+        property real removalOpacity: root.isMarkedForRemoval ? 0.45 : (root.isDragging ? 0.8 : 1.0)
+        Behavior on removalScale { NumberAnimation { duration: 150 } }
+        Behavior on removalOpacity { NumberAnimation { duration: 150 } }
+
+        opacity: Math.max(0.0, root.morphProgress * removalOpacity)
+        scale: Math.max(0.01, root.morphProgress * removalScale)
 
         transform: Translate {
             id: bounceTranslate
             y: 0
         }
-
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-        Behavior on scale { NumberAnimation { duration: 150 } }
 
         Image {
             id: iconImage
@@ -235,7 +237,6 @@ Item {
             fillMode: Image.PreserveAspectFit
             smooth: true
             mipmap: true
-            asynchronous: true
         }
 
         // Notification Badge
@@ -637,7 +638,7 @@ Item {
 
             MacMenuItem {
                 text: "Move Right"
-                enabled: root.itemIndex < (dockManager.apps.length - 1)
+                enabled: root.itemIndex < (dockManager.appCount - 1)
                 onTriggered: dockManager.moveApp(root.itemIndex, root.itemIndex + 1)
             }
 

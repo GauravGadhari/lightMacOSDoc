@@ -7,6 +7,7 @@ Item {
     property var dockMouseX: null // null when mouse is outside the dock
     property bool isMouseInside: false
     property bool isReady: false  // becomes true after initial items populate (no morph-in on startup)
+    property alias itemsRowRef: itemsRow
 
     readonly property real baseWidth: dockManager.baseIconWidth           // 57.6
     readonly property real maxMagnification: dockManager.maxMagnification // 2.0
@@ -103,18 +104,14 @@ Item {
                 }
 
                 var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
-                dockItem.lastWidth = dockItem.currentWidth;
-                dockItem.currentWidth = nextW;
-
-                // Factor morphProgress into the actual displayed width
-                var newW = nextW * dockItem.morphProgress;
-                if (Math.abs(dockItem.width - newW) > 0.01) {
-                    dockItem.width = newW;
+                if (Math.abs(dockItem.currentWidth - nextW) > 0.005) {
+                    dockItem.lastWidth = dockItem.currentWidth;
+                    dockItem.currentWidth = nextW;
                     needsLayout = true;
                 }
             }
 
-            // Force Row to reposition siblings when widths change (morph animations)
+            // Force Row to reposition siblings when widths change
             if (needsLayout) {
                 itemsRow.forceLayout();
             }
@@ -299,7 +296,7 @@ Item {
 
             Repeater {
                 id: itemsRepeater
-                model: dockManager.apps
+                model: dockManager.appsModel
 
                 delegate: Row {
                     id: delegateRow
@@ -309,7 +306,10 @@ Item {
 
                     property alias dockItemInstance: dockItem
 
+                    width: (dockDivider.visible ? (dockDivider.width + spacing) * dockItem.morphProgress : 0) + dockItem.width
+
                     DockDivider {
+                        id: dockDivider
                         visible: modelData.dockBreaksBefore && dockItem.morphProgress > 0.01
                         anchors.bottom: parent.bottom
                         opacity: dockItem.morphProgress

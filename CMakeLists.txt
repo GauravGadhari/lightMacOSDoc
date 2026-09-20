@@ -24,6 +24,8 @@ qt_add_executable(macos-dock-qt6
     src/main.cpp
     src/app_item.h
     src/app_item.cpp
+    src/app_list_model.h
+    src/app_list_model.cpp
     src/dock_manager.h
     src/dock_manager.cpp
     resources.qrc
