@@ -9,6 +9,12 @@ Item {
     property bool isReady: false  // becomes true after initial items populate (no morph-in on startup)
     property alias itemsRowRef: itemsRow
 
+    onDockMouseXChanged: {
+        if (dockMouseX === null) {
+            root.isMouseInside = false;
+        }
+    }
+
     readonly property real baseWidth: dockManager.baseIconWidth           // 57.6
     readonly property real maxMagnification: dockManager.maxMagnification // 2.0
     readonly property real distanceLimit: baseWidth * 6.0                 // 345.6
@@ -174,6 +180,7 @@ Item {
 
         onExited: {
             root.dockMouseX = null;
+            root.isMouseInside = false;
         }
     }
 

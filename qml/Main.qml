@@ -9,6 +9,21 @@ Window {
     flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
     color: "transparent"
 
+    // Track pointer leaving the window completely
+    HoverHandler {
+        id: windowHoverHandler
+        onHoveredChanged: {
+            if (!hovered) {
+                dockContainer.isMouseInside = false;
+                dockContainer.dockMouseX = null;
+                if (!dockManager.isMenuOpen && root.dockVisible) {
+                    autoHideTimer.interval = 500;
+                    autoHideTimer.restart();
+                }
+            }
+        }
+    }
+
     // ── NEVER RESIZE ──
     // Window is ALWAYS 220px × fullWidth. We MOVE it up/down instead.
     // Moving = no GPU buffer realloc = no black square flicker.
@@ -75,12 +90,32 @@ Window {
     // ── Auto-Hide Timer ──
     Timer {
         id: autoHideTimer
-        interval: 700
+        interval: 650
         repeat: false
         onTriggered: {
-            // Auto-hide when mouse is outside the dock, no menu is open, and no app is launching
-            if (!dockContainer.isMouseInside && !dockManager.isMenuOpen && !dockManager.hasLaunchingApp) {
+            // Auto-hide when mouse is outside the dock and no menu is open
+            if (!dockContainer.isMouseInside && !dockManager.isMenuOpen) {
                 root.dockVisible = false;
+            } else if (root.dockVisible && !dockContainer.isMouseInside) {
+                // If blocked by menu, retry in 400ms so it doesn't stay stuck
+                autoHideTimer.interval = 400;
+                autoHideTimer.restart();
+            }
+        }
+    }
+
+    // ── Watchdog Timer: Guarantees dock never stays stuck open when cursor is away ──
+    Timer {
+        id: autoHideWatchdog
+        interval: 800
+        repeat: true
+        running: root.dockVisible && !slideHideAnim.running
+        onTriggered: {
+            if (!dockContainer.isMouseInside && !dockManager.isMenuOpen && root.dockVisible) {
+                if (!autoHideTimer.running) {
+                    autoHideTimer.interval = 400;
+                    autoHideTimer.restart();
+                }
             }
         }
     }
@@ -180,26 +215,29 @@ Window {
         }
     }
 
-    // ── Menu Open State Connection ──
+    // ── Dock Manager Signals Connection ──
     Connections {
         target: dockManager
+        function onMouseLeftWindow() {
+            dockContainer.isMouseInside = false;
+            dockContainer.dockMouseX = null;
+            if (!dockManager.isMenuOpen && root.dockVisible) {
+                autoHideTimer.interval = 400;
+                autoHideTimer.restart();
+            }
+        }
         function onIsMenuOpenChanged() {
             if (!dockManager.isMenuOpen) {
                 if (!dockContainer.isMouseInside && root.dockVisible) {
+                    autoHideTimer.interval = 500;
                     autoHideTimer.restart();
                 }
             }
         }
-    }
-
-    // ── App Launch Auto-Dismiss (waits until launch finishes before dismissing) ──
-    Connections {
-        target: dockManager
         function onHasLaunchingAppChanged() {
-            if (!dockManager.hasLaunchingApp && !dockContainer.isMouseInside) {
-                autoHideTimer.interval = 800;
+            if (!dockManager.hasLaunchingApp && !dockContainer.isMouseInside && root.dockVisible) {
+                autoHideTimer.interval = 600;
                 autoHideTimer.restart();
-                Qt.callLater(function() { autoHideTimer.interval = 700; });
             }
         }
     }

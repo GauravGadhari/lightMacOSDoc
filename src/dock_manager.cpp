@@ -60,7 +60,22 @@ int DockManager::appCount() const {
 }
 
 void DockManager::setWindow(QQuickWindow *win) {
+    if (m_window) {
+        m_window->removeEventFilter(this);
+    }
     m_window = win;
+    if (m_window) {
+        m_window->installEventFilter(this);
+    }
+}
+
+bool DockManager::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == m_window) {
+        if (event->type() == QEvent::Leave) {
+            emit mouseLeftWindow();
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 void DockManager::setIsMenuOpen(bool open) {
@@ -1080,7 +1095,7 @@ void DockManager::launchNewInstance(const QString &id) {
     emit appLaunched(id);
 
     // Timeout safety fallback if process never creates a window
-    QTimer::singleShot(15000, this, [this, id]() {
+    QTimer::singleShot(4000, this, [this, id]() {
         if (m_launchingAppIds.remove(id)) {
             emit appLaunchFinished(id);
             emit hasLaunchingAppChanged();

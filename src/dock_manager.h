@@ -98,6 +98,10 @@ signals:
     void appSwitched(const QString &id);
     void appLaunchFinished(const QString &id);
     void hasLaunchingAppChanged();
+    void mouseLeftWindow();
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void initDefaultApps();
