@@ -461,6 +461,7 @@ QString DockManager::getAppQuery(const QString &id) {
     if (id == "appstore") return "plasma-discover|discover|software";
     if (id == "tv") return "sonyliv|sony liv|vlc|mpv";
     if (id == "spectacle" || id == "org.kde.spectacle") return "spectacle";
+    if (id == "recordly") return "recordly";
     return id;
 }
 
@@ -1244,6 +1245,7 @@ void DockManager::initDefaultApps() {
         {"antigravity", "Antigravity", "qrc:/icons/antigravity/256.png", "/home/gaurav/.local/bin/antigravity-ide || /opt/antigravity/antigravity --no-sandbox || antigravity", false},
         {"terminal", "Terminal", "qrc:/icons/terminal/256.png", "konsole || gnome-terminal || alacritty || x-terminal-emulator || kitty", false},
         {"calculator", "Calculator", "qrc:/icons/calculator/256.png", "kcalc || gnome-calculator", false},
+        {"recordly", "Recordly", "file:///home/gaurav/.local/share/icons/recordly.png", "/home/gaurav/.local/bin/recordly", false},
         {"wallpapers", "Wallpapers", "qrc:/icons/wallpapers/256.png", "systemsettings kcm_desktoptheme || xdg-open /usr/share/wallpapers", true},
         {"view-source", "GitHub", "qrc:/icons/view-source/256.png", "xdg-open https://github.com/GauravGadhari", false}
     };
