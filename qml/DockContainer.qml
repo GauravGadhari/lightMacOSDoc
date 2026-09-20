@@ -96,7 +96,7 @@ Item {
 
                 // ── LIVE distance, exactly like Svelte's getBoundingClientRect() ──
                 var targetW = root.baseWidth;
-                if (root.dockMouseX !== null && !dockItem.appData.isRemoving) {
+                if (root.dockMouseX !== null && (!dockItem.appData || !dockItem.appData.isRemoving)) {
                     // Use the IMAGE center (live), same as Svelte's image_el.getBoundingClientRect()
                     var imgCenter = dockItem.mapToItem(null, dockItem.width / 2, 0);
                     var dist = Math.abs(root.dockMouseX - imgCenter.x);

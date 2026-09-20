@@ -13,8 +13,8 @@ Item {
     property real currentWidth: 57.6
 
     // ── Morph Progress: 0.0 = collapsed/invisible, 1.0 = fully expanded ──
-    // Items at startup begin at 1.0 (no animation). Dynamically added items start at 0.0.
-    property real morphProgress: (dockContainerRef && dockContainerRef.isReady) ? 0.0 : 1.0
+    // Items start at 1.0. Dynamically added items set to 0.0 and animate in onCompleted.
+    property real morphProgress: 1.0
 
     // Hovered = dockMouseX is within this item's horizontal span
     property bool isHovered: {
@@ -145,6 +145,7 @@ Item {
     Component.onCompleted: {
         // If the dock is ready (not initial startup), this is a dynamically added app — morph in
         if (dockContainerRef && dockContainerRef.isReady) {
+            morphProgress = 0.0;
             morphInAnim.restart();
         }
     }
