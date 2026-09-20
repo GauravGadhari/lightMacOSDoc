@@ -104,8 +104,8 @@ void DockManager::saveApps() {
     QJsonArray array;
     for (QObject *obj : m_apps) {
         auto *item = qobject_cast<AppItem*>(obj);
-        // ONLY persist pinned apps
-        if (item && item->isPinned()) {
+        // ONLY persist pinned apps that are not being removed
+        if (item && item->isPinned() && !item->isRemoving()) {
             array.append(item->toJson());
         }
     }
@@ -166,17 +166,31 @@ void DockManager::moveApp(int fromIndex, int toIndex) {
 void DockManager::removeApp(int index) {
     if (index < 0 || index >= m_apps.size()) return;
 
-    QObject *obj = m_apps.takeAt(index);
-    emit appsChanged();
-    obj->deleteLater();
-    saveApps();
+    auto *item = qobject_cast<AppItem*>(m_apps.at(index));
+    if (item) {
+        item->setIsRemoving(true);
+        // QML morph-out animation will call finalizeRemoveApp when done
+    }
 }
 
 void DockManager::removeAppById(const QString &id) {
     for (int i = 0; i < m_apps.size(); ++i) {
         auto *item = qobject_cast<AppItem*>(m_apps.at(i));
         if (item && item->id() == id) {
-            removeApp(i);
+            item->setIsRemoving(true);
+            return;
+        }
+    }
+}
+
+void DockManager::finalizeRemoveApp(const QString &id) {
+    for (int i = 0; i < m_apps.size(); ++i) {
+        auto *item = qobject_cast<AppItem*>(m_apps.at(i));
+        if (item && item->id() == id) {
+            m_apps.removeAt(i);
+            emit appsChanged();
+            item->deleteLater();
+            saveApps();
             return;
         }
     }
@@ -186,6 +200,10 @@ void DockManager::pinApp(const QString &id) {
     for (QObject *obj : m_apps) {
         auto *item = qobject_cast<AppItem*>(obj);
         if (item && item->id() == id) {
+            // Cancel any in-progress removal if user pins the app
+            if (item->isRemoving()) {
+                item->setIsRemoving(false);
+            }
             item->setIsPinned(true);
             saveApps();
             emit appsChanged();
@@ -203,7 +221,8 @@ void DockManager::unpinApp(const QString &id) {
                 saveApps();
                 emit appsChanged();
             } else {
-                removeApp(i);
+                // Mark for animated removal; QML will call finalizeRemoveApp
+                item->setIsRemoving(true);
             }
             return;
         }
@@ -804,6 +823,10 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             auto *item = qobject_cast<AppItem*>(obj);
             if (item && item->id() == key) {
                 targetItem = item;
+                // Cancel any in-progress removal — app has windows again
+                if (item->isRemoving()) {
+                    item->setIsRemoving(false);
+                }
                 break;
             }
         }
@@ -895,7 +918,18 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
             bool isBlacklisted = idLower.contains("macos-dock") || idLower == "macos dock" ||
                                  idLower.contains("videobridge") ||
                                  idLower == "plasmashell" || idLower == "krunner";
-            if (item->windowCount() == 0 || isBlacklisted) {
+
+            if (isBlacklisted) {
+                // Force-remove blacklisted apps instantly (they should never appear)
+                m_apps.removeAt(i);
+                item->deleteLater();
+                structureChanged = true;
+            } else if (item->windowCount() == 0 && !item->isRemoving()) {
+                // Mark for animated removal — QML morph-out will call finalizeRemoveApp
+                item->setIsRemoving(true);
+            } else if (item->isRemoving() && item->removingElapsedMs() > 4000) {
+                // Safety fallback: if animation didn't complete in 4 seconds, force remove
+                qDebug() << "[DockManager] Safety fallback: force removing stuck item" << item->id();
                 m_apps.removeAt(i);
                 item->deleteLater();
                 structureChanged = true;

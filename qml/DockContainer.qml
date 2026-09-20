@@ -6,6 +6,7 @@ Item {
 
     property var dockMouseX: null // null when mouse is outside the dock
     property bool isMouseInside: false
+    property bool isReady: false  // becomes true after initial items populate (no morph-in on startup)
 
     readonly property real baseWidth: dockManager.baseIconWidth           // 57.6
     readonly property real maxMagnification: dockManager.maxMagnification // 2.0
@@ -84,6 +85,8 @@ Item {
             var count = itemsRepeater.count;
             if (count === 0) return;
 
+            var needsLayout = false;
+
             for (var i = 0; i < count; ++i) {
                 var delegate = itemsRepeater.itemAt(i);
                 if (!delegate) continue;
@@ -92,7 +95,7 @@ Item {
 
                 // ── LIVE distance, exactly like Svelte's getBoundingClientRect() ──
                 var targetW = root.baseWidth;
-                if (root.dockMouseX !== null) {
+                if (root.dockMouseX !== null && !dockItem.appData.isRemoving) {
                     // Use the IMAGE center (live), same as Svelte's image_el.getBoundingClientRect()
                     var imgCenter = dockItem.mapToItem(null, dockItem.width / 2, 0);
                     var dist = Math.abs(root.dockMouseX - imgCenter.x);
@@ -102,7 +105,18 @@ Item {
                 var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
                 dockItem.lastWidth = dockItem.currentWidth;
                 dockItem.currentWidth = nextW;
-                dockItem.width = nextW;
+
+                // Factor morphProgress into the actual displayed width
+                var newW = nextW * dockItem.morphProgress;
+                if (Math.abs(dockItem.width - newW) > 0.01) {
+                    dockItem.width = newW;
+                    needsLayout = true;
+                }
+            }
+
+            // Force Row to reposition siblings when widths change (morph animations)
+            if (needsLayout) {
+                itemsRow.forceLayout();
             }
         }
     }
@@ -125,7 +139,18 @@ Item {
     }
 
     onWidthChanged: updateMaskTimer.restart()
-    Component.onCompleted: updateMaskTimer.restart()
+    Component.onCompleted: {
+        updateMaskTimer.restart();
+        // Delay isReady so initial dock items don't morph-in on startup
+        readyDelayTimer.start();
+    }
+
+    Timer {
+        id: readyDelayTimer
+        interval: 200
+        repeat: false
+        onTriggered: root.isReady = true
+    }
 
     // Extra padding on sides so magnified edge icons aren't clipped
     width: dockPill.width + 200
@@ -285,8 +310,9 @@ Item {
                     property alias dockItemInstance: dockItem
 
                     DockDivider {
-                        visible: modelData.dockBreaksBefore
+                        visible: modelData.dockBreaksBefore && dockItem.morphProgress > 0.01
                         anchors.bottom: parent.bottom
+                        opacity: dockItem.morphProgress
                     }
 
                     DockItem {

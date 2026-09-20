@@ -89,6 +89,16 @@ void AppItem::setWindows(const QVariantList &windows) {
     setIsActive(active);
 }
 
+void AppItem::setIsRemoving(bool removing) {
+    if (m_isRemoving != removing) {
+        m_isRemoving = removing;
+        if (removing) {
+            m_removingTimer.start();
+        }
+        emit isRemovingChanged();
+    }
+}
+
 QJsonObject AppItem::toJson() const {
     QJsonObject obj;
     obj["id"] = m_id;

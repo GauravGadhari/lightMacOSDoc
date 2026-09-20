@@ -4,6 +4,7 @@
 #include <QString>
 #include <QJsonObject>
 #include <QVariantList>
+#include <QElapsedTimer>
 
 class AppItem : public QObject {
     Q_OBJECT
@@ -19,6 +20,7 @@ class AppItem : public QObject {
     Q_PROPERTY(bool isPinned READ isPinned WRITE setIsPinned NOTIFY isPinnedChanged)
     Q_PROPERTY(QVariantList windows READ windows NOTIFY windowsChanged)
     Q_PROPERTY(int windowCount READ windowCount NOTIFY windowsChanged)
+    Q_PROPERTY(bool isRemoving READ isRemoving WRITE setIsRemoving NOTIFY isRemovingChanged)
 
 public:
     explicit AppItem(const QString &id,
@@ -42,6 +44,8 @@ public:
     bool isPinned() const { return m_isPinned; }
     QVariantList windows() const { return m_windows; }
     int windowCount() const { return m_windows.size(); }
+    bool isRemoving() const { return m_isRemoving; }
+    qint64 removingElapsedMs() const { return m_isRemoving ? m_removingTimer.elapsed() : 0; }
 
     void setTitle(const QString &title);
     void setIcon(const QString &icon);
@@ -52,6 +56,7 @@ public:
     void setDockBreaksBefore(bool breaks);
     void setIsPinned(bool pinned);
     void setWindows(const QVariantList &windows);
+    void setIsRemoving(bool removing);
 
     QJsonObject toJson() const;
     static AppItem* fromJson(const QJsonObject &json, QObject *parent = nullptr);
@@ -66,6 +71,7 @@ signals:
     void dockBreaksBeforeChanged();
     void isPinnedChanged();
     void windowsChanged();
+    void isRemovingChanged();
 
 private:
     QString m_id;
@@ -78,5 +84,7 @@ private:
     bool m_isSeparator = false;
     bool m_dockBreaksBefore = false;
     bool m_isPinned = true;
+    bool m_isRemoving = false;
+    QElapsedTimer m_removingTimer;
     QVariantList m_windows;
 };

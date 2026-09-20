@@ -12,6 +12,10 @@ Item {
     property real lastWidth: 57.6
     property real currentWidth: 57.6
 
+    // ── Morph Progress: 0.0 = collapsed/invisible, 1.0 = fully expanded ──
+    // Items at startup begin at 1.0 (no animation). Dynamically added items start at 0.0.
+    property real morphProgress: (dockContainerRef && dockContainerRef.isReady) ? 0.0 : 1.0
+
     // Hovered = dockMouseX is within this item's horizontal span
     property bool isHovered: {
         if (!dockContainerRef || dockContainerRef.dockMouseX === null) return false;
@@ -21,7 +25,7 @@ Item {
     property bool isDragging: false
     property bool isMarkedForRemoval: false
 
-    width: currentWidth
+    width: currentWidth * morphProgress
     height: currentWidth
     clip: false
 
@@ -107,8 +111,51 @@ Item {
         onTriggered: stopContinuousJump()
     }
 
+    // ── Morph-In Animation (entry: 0.0 → 1.0) ──
+    NumberAnimation {
+        id: morphInAnim
+        target: root
+        property: "morphProgress"
+        from: 0.0; to: 1.0
+        duration: 260
+        easing.type: Easing.OutCubic
+    }
+
+    // ── Morph-Out Animation (exit: current → 0.0) ──
+    NumberAnimation {
+        id: morphOutAnim
+        target: root
+        property: "morphProgress"
+        to: 0.0
+        duration: 240
+        easing.type: Easing.InOutCubic
+        onFinished: {
+            if (appData && appData.isRemoving) {
+                dockManager.finalizeRemoveApp(appData.id);
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        // If the dock is ready (not initial startup), this is a dynamically added app — morph in
+        if (dockContainerRef && dockContainerRef.isReady) {
+            morphInAnim.restart();
+        }
+    }
+
     Connections {
         target: appData ? appData : null
+        function onIsRemovingChanged() {
+            if (appData && appData.isRemoving) {
+                // Start morph-out animation
+                morphInAnim.stop();
+                morphOutAnim.restart();
+            } else if (appData && !appData.isRemoving) {
+                // Removal was cancelled (app regained windows) — morph back in
+                morphOutAnim.stop();
+                morphInAnim.restart();
+            }
+        }
         function onWindowCountChanged() {
             if (appData && appData.windowCount > 0) {
                 stopContinuousJump();
@@ -157,13 +204,21 @@ Item {
     // Icon Container
     Item {
         id: iconVisual
-        anchors.left: parent.left
-        anchors.right: parent.right
+        width: root.currentWidth
+        height: root.currentWidth
+        anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        height: parent.height
         clip: false
-        opacity: root.isMarkedForRemoval ? 0.45 : (root.isDragging ? 0.8 : 1.0)
-        scale: root.isMarkedForRemoval ? 0.8 : 1.0
+        transformOrigin: Item.Bottom
+
+        opacity: {
+            var base = root.isMarkedForRemoval ? 0.45 : (root.isDragging ? 0.8 : 1.0);
+            return base * Math.min(1.0, root.morphProgress * 3.0);  // fade in fast over first 33%
+        }
+        scale: {
+            var base = root.isMarkedForRemoval ? 0.8 : 1.0;
+            return base * Math.max(0.01, root.morphProgress);
+        }
 
         transform: Translate {
             id: bounceTranslate
@@ -229,7 +284,7 @@ Item {
             return dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.65) : Qt.rgba(0.2, 0.2, 0.2, 0.65);
         }
 
-        opacity: (appData && appData.isRunning && !root.isDragging) ? 1.0 : 0.0
+        opacity: (appData && appData.isRunning && !root.isDragging && !appData.isRemoving) ? root.morphProgress : 0.0
 
         Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.OutQuad } }
         Behavior on color { ColorAnimation { duration: 200 } }
@@ -243,6 +298,7 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
+        enabled: !(appData && appData.isRemoving)
         cursorShape: root.isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
 
         property real pressX: 0

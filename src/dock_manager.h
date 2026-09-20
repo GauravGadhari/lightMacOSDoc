@@ -62,6 +62,7 @@ public:
     Q_INVOKABLE void toggleDividerBefore(const QString &id);
     Q_INVOKABLE void resetToDefaultApps();
     Q_INVOKABLE void cleanupKWinWindowTracker();
+    Q_INVOKABLE void finalizeRemoveApp(const QString &id);
 
 public Q_SLOTS:
     void updateWindows(const QString &json);
