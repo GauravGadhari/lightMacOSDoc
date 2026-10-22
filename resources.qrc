@@ -8,6 +8,8 @@
         <file>qml/SettingsDialog.qml</file>
         <file>qml/CalculatorWindow.qml</file>
         <file>qml/WallpaperWindow.qml</file>
+        <file>qml/WindowPreviewCard.qml</file>
+        <file>qml/WindowPreviewPopup.qml</file>
         <file alias="icons/appstore/1024.png">assets/icons/appstore/1024.png</file>
         <file alias="icons/appstore/128.webp">assets/icons/appstore/128.webp</file>
         <file alias="icons/appstore/16.png">assets/icons/appstore/16.png</file>

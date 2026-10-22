@@ -12,8 +12,17 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QDateTime>
+#include <QThread>
 #include <QRegularExpression>
 #include <QSet>
+#include <QMimeDatabase>
+#include <QMimeType>
+#include <QCryptographicHash>
+#include <QImage>
+#include <QPainter>
+#include <QPainterPath>
+#include <QLinearGradient>
+#include <QFont>
 
 DockManager::DockManager(QObject *parent) : QObject(parent) {
     m_appModel = new AppListModel(this);
@@ -33,6 +42,7 @@ DockManager::DockManager(QObject *parent) : QObject(parent) {
     QTimer::singleShot(400, this, &DockManager::refreshRunningStatus);
 
     // Health check timer to verify KWin tracker is alive
+    m_lastWindowUpdateTime = QDateTime::currentDateTime();
     m_pollTimer = new QTimer(this);
     connect(m_pollTimer, &QTimer::timeout, this, &DockManager::checkTrackerHealth);
     m_pollTimer->start(2000);
@@ -190,9 +200,19 @@ void DockManager::moveApp(int fromIndex, int toIndex) {
         return;
     }
 
+    if (qAbs(fromIndex - toIndex) == 1) {
+        AppItem *fromItem = m_appModel->at(fromIndex);
+        AppItem *toItem = m_appModel->at(toIndex);
+        if (fromItem && toItem && fromItem->dockBreaksBefore() != toItem->dockBreaksBefore()) {
+            bool fromBreaks = fromItem->dockBreaksBefore();
+            fromItem->setDockBreaksBefore(toItem->dockBreaksBefore());
+            toItem->setDockBreaksBefore(fromBreaks);
+        }
+    }
+
     m_appModel->move(fromIndex, toIndex);
     emit appsChanged();
-    saveApps();
+    QTimer::singleShot(250, this, &DockManager::saveApps);
 }
 
 void DockManager::removeApp(int index) {
@@ -284,8 +304,11 @@ void DockManager::toggleDividerBefore(const QString &id) {
     }
 }
 
-void DockManager::addApp(const QString &id, const QString &title, const QString &icon, const QString &execCommand, bool dockBreaksBefore) {
-    QString uniqueId = id;
+void DockManager::addApp(const QString &id, const QString &title, const QString &icon, const QString &execCommand, bool dockBreaksBefore, int insertIndex) {
+    QString cleanBaseId = id.trimmed();
+    if (cleanBaseId.isEmpty()) cleanBaseId = "item";
+
+    QString uniqueId = cleanBaseId;
     int counter = 1;
     bool exists = true;
     while (exists) {
@@ -293,14 +316,18 @@ void DockManager::addApp(const QString &id, const QString &title, const QString 
         for (AppItem *item : m_appModel->items()) {
             if (item && item->id() == uniqueId) {
                 exists = true;
-                uniqueId = QString("%1_%2").arg(id).arg(counter++);
+                uniqueId = QString("%1_%2").arg(cleanBaseId).arg(counter++);
                 break;
             }
         }
     }
 
     auto *item = new AppItem(uniqueId, title, icon, execCommand, dockBreaksBefore, false, true, this);
-    m_appModel->append(item);
+    if (insertIndex >= 0 && insertIndex <= m_appModel->size()) {
+        m_appModel->insert(insertIndex, item);
+    } else {
+        m_appModel->append(item);
+    }
     emit appsChanged();
     saveApps();
 }
@@ -308,7 +335,10 @@ void DockManager::addApp(const QString &id, const QString &title, const QString 
 QString DockManager::resolveSystemIcon(const QString &iconName) {
     if (iconName.isEmpty()) return "qrc:/icons/launchpad/256.png";
     if (iconName.startsWith("/") || iconName.startsWith("file://") || iconName.startsWith("qrc:/")) {
-        return iconName.startsWith("/") ? ("file://" + iconName) : iconName;
+        QString rawPath = iconName.startsWith("file://") ? iconName.mid(7) : iconName;
+        if (iconName.startsWith("qrc:/") || QFile::exists(rawPath)) {
+            return iconName.startsWith("/") ? ("file://" + iconName) : iconName;
+        }
     }
 
     QString cleanName = iconName;
@@ -320,6 +350,9 @@ QString DockManager::resolveSystemIcon(const QString &iconName) {
     if (cleanName == "spectacle" || cleanName == "org.kde.spectacle" || cleanName == "accessories-screenshot") {
         return "qrc:/icons/spectacle/256.png";
     }
+    if (cleanName == "antigravity" || cleanName == "antigravity-ide") {
+        return "qrc:/icons/antigravity/256.png";
+    }
 
     QString home = QDir::homePath();
     QStringList searchPaths = {
@@ -329,18 +362,27 @@ QString DockManager::resolveSystemIcon(const QString &iconName) {
         home + "/.local/share/icons/MacTahoe/apps/256x256/",
         home + "/.local/share/icons/MacTahoe-dark/apps/256x256/",
         home + "/.local/share/icons/WhiteSur/apps/256x256/",
+        home + "/.local/share/icons/MacTahoe/mimes/scalable/",
+        home + "/.local/share/icons/WhiteSur/mimes/scalable/",
+        home + "/.local/share/icons/MacTahoe/places/scalable/",
+        home + "/.local/share/icons/WhiteSur/places/scalable/",
+        "/var/lib/flatpak/exports/share/icons/hicolor/scalable/apps/",
+        "/var/lib/flatpak/exports/share/icons/hicolor/256x256/apps/",
+        home + "/.local/share/flatpak/exports/share/icons/hicolor/scalable/apps/",
+        home + "/.local/share/flatpak/exports/share/icons/hicolor/256x256/apps/",
         "/usr/share/icons/hicolor/256x256/apps/",
         "/usr/share/icons/hicolor/128x128/apps/",
         "/usr/share/icons/hicolor/scalable/apps/",
         "/usr/share/icons/hicolor/64x64/apps/",
         "/usr/share/icons/hicolor/48x48/apps/",
         "/usr/share/icons/breeze/apps/48/",
+        "/usr/share/icons/breeze/mimetypes/64/",
         "/usr/share/pixmaps/",
         home + "/.local/share/icons/hicolor/256x256/apps/",
         home + "/.local/share/icons/hicolor/scalable/apps/"
     };
 
-    QStringList extensions = {".png", ".svg", ".xpm"};
+    QStringList extensions = {".svg", ".png", ".xpm"};
 
     for (const QString &dir : searchPaths) {
         for (const QString &ext : extensions) {
@@ -352,6 +394,328 @@ QString DockManager::resolveSystemIcon(const QString &iconName) {
     }
 
     return "qrc:/icons/launchpad/256.png";
+}
+
+QString DockManager::findDesktopFilePath(const QString &nameOrPath) {
+    QString cleaned = nameOrPath.trimmed();
+    if (cleaned.startsWith("file://")) {
+        cleaned = QUrl(cleaned).toLocalFile();
+    } else if (cleaned.startsWith("applications:")) {
+        cleaned.remove(QRegularExpression("^applications:/+"));
+    }
+
+    if (cleaned.startsWith("/") && QFile::exists(cleaned) && cleaned.endsWith(".desktop", Qt::CaseInsensitive)) {
+        return cleaned;
+    }
+
+    QString base = QFileInfo(cleaned).fileName();
+    if (base.endsWith(".desktop", Qt::CaseInsensitive)) {
+        base.chop(8);
+    }
+    if (base.isEmpty()) return QString();
+
+    QString home = QDir::homePath();
+    QStringList appDirs = {
+        home + "/.local/share/applications/",
+        "/usr/share/applications/",
+        "/var/lib/flatpak/exports/share/applications/",
+        home + "/.local/share/flatpak/exports/share/applications/",
+        "/var/lib/snapd/desktop/applications/"
+    };
+
+    QStringList candidates = {
+        base + ".desktop",
+        base.toLower() + ".desktop",
+        "org.kde." + base.toLower() + ".desktop",
+        "org.gnome." + base.toLower() + ".desktop"
+    };
+
+    for (const QString &dirPath : appDirs) {
+        for (const QString &cand : candidates) {
+            QString full = dirPath + cand;
+            if (QFile::exists(full)) return full;
+        }
+        QDir dir(dirPath);
+        if (dir.exists()) {
+            const QStringList entries = dir.entryList({"*.desktop"}, QDir::Files);
+            for (const QString &entry : entries) {
+                if (entry.compare(base + ".desktop", Qt::CaseInsensitive) == 0 ||
+                    entry.endsWith("." + base + ".desktop", Qt::CaseInsensitive)) {
+                    return dirPath + entry;
+                }
+            }
+        }
+    }
+    return QString();
+}
+
+QString DockManager::resolveFolderIcon(const QFileInfo &fi) {
+    QString name = fi.fileName().toLower();
+    QString folderSvg = "blue-folder.svg";
+
+    if (name.contains("download")) {
+        folderSvg = "blue-folder-download.svg";
+    } else if (name.contains("document") || name == "docs" || name == "papers") {
+        folderSvg = "blue-folder-documents.svg";
+    } else if (name.contains("picture") || name.contains("photo") || name.contains("image") || name.contains("screenshot") || name.contains("wallpaper")) {
+        folderSvg = "blue-folder-images.svg";
+    } else if (name.contains("music") || name.contains("audio") || name.contains("song") || name.contains("podcast")) {
+        folderSvg = "blue-folder-music.svg";
+    } else if (name.contains("video") || name.contains("movie") || name.contains("film") || name.contains("clip")) {
+        folderSvg = "blue-folder-videos.svg";
+    } else if (name == "desktop") {
+        folderSvg = "blue-user-desktop.svg";
+    } else if (name.contains("code") || name.contains("antigravity") || name.contains("project") || name.contains("dev") || name.contains("src") || name.contains("git") || name.contains("repo")) {
+        folderSvg = "blue-folder-code.svg";
+    } else if (name == QDir::home().dirName().toLower()) {
+        folderSvg = "blue-user-home.svg";
+    }
+
+    QString tahoePath = QDir::homePath() + "/.local/share/icons/MacTahoe/places/scalable/" + folderSvg;
+    if (QFile::exists(tahoePath)) {
+        return "file://" + tahoePath;
+    }
+    QString fallbackTahoe = QDir::homePath() + "/.local/share/icons/MacTahoe/places/scalable/blue-folder.svg";
+    if (QFile::exists(fallbackTahoe)) {
+        return "file://" + fallbackTahoe;
+    }
+    return "qrc:/icons/finder/256.png";
+}
+
+QString DockManager::createSquircleIconFromImage(const QImage &srcImg, const QString &cacheKey, bool addVideoPlayBadge) {
+    if (srcImg.isNull()) {
+        return addVideoPlayBadge ? "qrc:/icons/tv/256.png" : "qrc:/icons/photos/256.png";
+    }
+
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/macos-dock/dropped_icons";
+    QDir().mkpath(cacheDir);
+    QString outPath = cacheDir + "/" + cacheKey + ".png";
+
+    QImage canvas(256, 256, QImage::Format_ARGB32_Premultiplied);
+    canvas.fill(Qt::transparent);
+
+    QPainter p(&canvas);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+    QRectF iconRect(22.0, 22.0, 212.0, 212.0);
+    qreal radius = 47.0;
+
+    QPainterPath squircle;
+    squircle.addRoundedRect(iconRect, radius, radius);
+
+    p.save();
+    p.setClipPath(squircle);
+
+    // Subtle dark backing in case the image has transparent regions
+    p.fillRect(iconRect, QColor(28, 28, 32));
+
+    // Aspect-fill (cover crop) image into 212x212
+    QImage scaled = srcImg.scaled(212, 212, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    int srcX = qMax(0, (scaled.width() - 212) / 2);
+    int srcY = qMax(0, (scaled.height() - 212) / 2);
+    p.drawImage(iconRect.topLeft(), scaled, QRect(srcX, srcY, 212, 212));
+
+    if (addVideoPlayBadge) {
+        // Minimal translucent play pill in center
+        QRectF badgeRect(94.0, 94.0, 68.0, 68.0);
+        p.setPen(QPen(QColor(255, 255, 255, 210), 2.0));
+        p.setBrush(QColor(0, 0, 0, 145));
+        p.drawEllipse(badgeRect);
+
+        QPainterPath playTri;
+        playTri.moveTo(121.0, 114.0);
+        playTri.lineTo(143.0, 128.0);
+        playTri.lineTo(121.0, 142.0);
+        playTri.closeSubpath();
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255, 245));
+        p.drawPath(playTri);
+    }
+
+    p.restore();
+
+    // Crisp Apple specular inner rim
+    p.setPen(QPen(QColor(255, 255, 255, 65), 1.5));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(iconRect.adjusted(0.75, 0.75, -0.75, -0.75), radius, radius);
+    p.end();
+
+    canvas.save(outPath, "PNG");
+    return "file://" + outPath;
+}
+
+QString DockManager::extractVideoSquircleIcon(const QString &videoPath, const QString &cacheKey) {
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/macos-dock/dropped_icons";
+    QDir().mkpath(cacheDir);
+    QString tmpFrame = cacheDir + "/tmp_" + cacheKey + ".png";
+
+    auto tryExtract = [&](const QString &timestamp) -> bool {
+        QProcess ff;
+        ff.start("ffmpeg", {"-y", "-ss", timestamp, "-i", videoPath, "-frames:v", "1", "-vf", "scale=320:-1", tmpFrame});
+        if (!ff.waitForFinished(1500)) {
+            ff.kill();
+            ff.waitForFinished(200);
+            return false;
+        }
+        return QFile::exists(tmpFrame) && QFileInfo(tmpFrame).size() > 0;
+    };
+
+    if (tryExtract("00:00:01") || tryExtract("00:00:00")) {
+        QImage frame(tmpFrame);
+        QFile::remove(tmpFrame);
+        if (!frame.isNull()) {
+            return createSquircleIconFromImage(frame, cacheKey, true);
+        }
+    } else {
+        QFile::remove(tmpFrame);
+    }
+
+    return "qrc:/icons/tv/256.png";
+}
+
+QString DockManager::createTextSnippetIcon(const QString &text, const QString &cacheKey) {
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/macos-dock/dropped_icons";
+    QDir().mkpath(cacheDir);
+    QString outPath = cacheDir + "/" + cacheKey + ".png";
+
+    QImage canvas(256, 256, QImage::Format_ARGB32_Premultiplied);
+    canvas.fill(Qt::transparent);
+
+    QPainter p(&canvas);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QRectF iconRect(22.0, 22.0, 212.0, 212.0);
+    qreal radius = 47.0;
+
+    QPainterPath squircle;
+    squircle.addRoundedRect(iconRect, radius, radius);
+
+    p.save();
+    p.setClipPath(squircle);
+
+    // Warm Apple Notes card background
+    p.fillRect(iconRect, QColor(250, 248, 242));
+
+    // Classic Apple Notes amber/gold header band
+    QLinearGradient headerGrad(0, 22, 0, 70);
+    headerGrad.setColorAt(0.0, QColor(255, 208, 44));
+    headerGrad.setColorAt(1.0, QColor(240, 180, 18));
+    p.fillRect(QRectF(22.0, 22.0, 212.0, 48.0), headerGrad);
+
+    // Subtle paper ruled lines
+    p.setPen(QPen(QColor(0, 0, 0, 18), 1.0));
+    for (int y = 104; y <= 206; y += 26) {
+        p.drawLine(36, y, 220, y);
+    }
+
+    // Render live snippet text preview on the card
+    QString cleanSnippet = text.trimmed();
+    cleanSnippet.replace("\r\n", "\n");
+    if (cleanSnippet.length() > 140) {
+        cleanSnippet = cleanSnippet.left(140) + "...";
+    }
+
+    QFont font("sans-serif");
+    font.setPixelSize(17);
+    font.setWeight(QFont::DemiBold);
+    p.setFont(font);
+    p.setPen(QColor(40, 40, 44));
+    p.drawText(QRectF(36.0, 78.0, 184.0, 144.0), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, cleanSnippet);
+
+    p.restore();
+
+    // Subtle outer border
+    p.setPen(QPen(QColor(0, 0, 0, 40), 1.5));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(iconRect.adjusted(0.75, 0.75, -0.75, -0.75), radius, radius);
+    p.end();
+
+    canvas.save(outPath, "PNG");
+    return "file://" + outPath;
+}
+
+QString DockManager::createDocumentBadgeIcon(const QString &ext, const QString &cacheKey) {
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/macos-dock/dropped_icons";
+    QDir().mkpath(cacheDir);
+    QString outPath = cacheDir + "/" + cacheKey + ".png";
+
+    QImage canvas(256, 256, QImage::Format_ARGB32_Premultiplied);
+    canvas.fill(Qt::transparent);
+
+    QPainter p(&canvas);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::TextAntialiasing, true);
+
+    QRectF iconRect(22.0, 22.0, 212.0, 212.0);
+    qreal radius = 47.0;
+
+    QPainterPath squircle;
+    squircle.addRoundedRect(iconRect, radius, radius);
+
+    p.save();
+    p.setClipPath(squircle);
+
+    QLinearGradient bgGrad(0, 22, 0, 234);
+    bgGrad.setColorAt(0.0, QColor(248, 249, 252));
+    bgGrad.setColorAt(1.0, QColor(226, 229, 236));
+    p.fillRect(iconRect, bgGrad);
+
+    // Top accent bar
+    p.fillRect(QRectF(22.0, 22.0, 212.0, 42.0), QColor(10, 132, 255));
+
+    // Extension pill/text
+    QString badge = ext.toUpper().trimmed();
+    if (badge.isEmpty()) badge = "FILE";
+    if (badge.length() > 6) badge = badge.left(6);
+
+    QFont font("sans-serif");
+    font.setPixelSize(badge.length() <= 4 ? 42 : 32);
+    font.setWeight(QFont::Bold);
+    p.setFont(font);
+    p.setPen(QColor(34, 36, 42));
+    p.drawText(QRectF(32.0, 64.0, 192.0, 156.0), Qt::AlignCenter, badge);
+
+    p.restore();
+
+    p.setPen(QPen(QColor(0, 0, 0, 40), 1.5));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(iconRect.adjusted(0.75, 0.75, -0.75, -0.75), radius, radius);
+    p.end();
+
+    canvas.save(outPath, "PNG");
+    return "file://" + outPath;
+}
+
+QString DockManager::resolveMimeIcon(const QFileInfo &fi) {
+    QMimeDatabase db;
+    QMimeType mime = db.mimeTypeForFile(fi);
+
+    QString home = QDir::homePath();
+    QStringList mimeDirs = {
+        home + "/.local/share/icons/MacTahoe/mimes/scalable/",
+        home + "/.local/share/icons/WhiteSur/mimes/scalable/",
+        "/usr/share/icons/breeze/mimetypes/64/",
+        "/usr/share/icons/hicolor/scalable/mimetypes/",
+        "/usr/share/icons/hicolor/256x256/mimetypes/"
+    };
+
+    QStringList iconCandidates;
+    if (mime.isValid()) {
+        if (!mime.iconName().isEmpty()) iconCandidates.append(mime.iconName());
+        if (!mime.genericIconName().isEmpty()) iconCandidates.append(mime.genericIconName());
+    }
+
+    for (const QString &cand : iconCandidates) {
+        for (const QString &dir : mimeDirs) {
+            if (QFile::exists(dir + cand + ".svg")) return "file://" + dir + cand + ".svg";
+            if (QFile::exists(dir + cand + ".png")) return "file://" + dir + cand + ".png";
+        }
+    }
+
+    QByteArray hash = QCryptographicHash::hash(fi.absoluteFilePath().toUtf8(), QCryptographicHash::Md5).toHex().left(12);
+    return createDocumentBadgeIcon(fi.suffix(), "doc_" + QString::fromLatin1(hash));
 }
 
 QString DockManager::parseDesktopFile(const QString &path, QString &title, QString &icon, QString &exec) {
@@ -390,44 +754,249 @@ QString DockManager::parseDesktopFile(const QString &path, QString &title, QStri
         icon = "qrc:/icons/launchpad/256.png";
     }
     if (exec.isEmpty()) {
-        exec = "gtk-launch " + QFileInfo(path).fileName() + " || xdg-open " + path;
+        exec = "gtk-launch " + QFileInfo(path).fileName() + " || xdg-open \"" + path + "\"";
     }
 
     return QFileInfo(path).baseName().toLower();
 }
 
-void DockManager::addAppsFromUrls(const QList<QUrl> &urls) {
-    for (const QUrl &url : urls) {
-        if (url.isLocalFile()) {
-            QString localPath = url.toLocalFile();
-            QFileInfo fi(localPath);
-            if (localPath.endsWith(".desktop", Qt::CaseInsensitive)) {
-                QString title, icon, exec;
-                QString id = parseDesktopFile(localPath, title, icon, exec);
-                if (!title.isEmpty()) {
-                    addApp(id, title, icon, exec, false);
+bool DockManager::addSingleLocalPath(const QString &localPath, int &insertIndex, bool &placeAfterDivider) {
+    QString cleanPath = localPath.trimmed();
+    if (cleanPath.startsWith("~/")) {
+        cleanPath = QDir::homePath() + cleanPath.mid(1);
+    }
+
+    // 1. Check if it's a .desktop file or application name
+    if (cleanPath.endsWith(".desktop", Qt::CaseInsensitive)) {
+        QString resolvedDesktop = findDesktopFilePath(cleanPath);
+        if (!resolvedDesktop.isEmpty()) {
+            QString title, icon, exec;
+            QString id = parseDesktopFile(resolvedDesktop, title, icon, exec);
+            if (!title.isEmpty()) {
+                bool breaks = false;
+                if (placeAfterDivider && insertIndex >= 0 && insertIndex < m_appModel->size() && m_appModel->at(insertIndex)->dockBreaksBefore()) {
+                    breaks = true;
+                    m_appModel->at(insertIndex)->setDockBreaksBefore(false);
+                    placeAfterDivider = false;
                 }
-            } else if (fi.isExecutable() && !fi.isDir()) {
-                QString title = fi.fileName();
-                QString exec = QString("nohup \"%1\" >/dev/null 2>&1 &").arg(localPath);
-                QString icon = "qrc:/icons/terminal/256.png";
-                addApp(title.toLower(), title, icon, exec, false);
-            } else if (fi.exists()) {
-                QString title = fi.fileName();
-                QString exec = QString("xdg-open \"%1\"").arg(localPath);
-                QString icon = fi.isDir() ? "qrc:/icons/finder/256.png" : "qrc:/icons/launchpad/256.png";
-                addApp(title.toLower(), title, icon, exec, false);
+                addApp(id, title, icon, exec, breaks, insertIndex);
+                if (insertIndex >= 0) insertIndex++;
+                return true;
+            }
+        }
+    }
+
+    QFileInfo fi(cleanPath);
+    if (!fi.exists()) return false;
+
+    QString absPath = fi.absoluteFilePath();
+    QByteArray pathHash = QCryptographicHash::hash(absPath.toUtf8(), QCryptographicHash::Md5).toHex().left(10);
+    QString hashStr = QString::fromLatin1(pathHash);
+
+    auto commitAdd = [&](const QString &id, const QString &title, const QString &icon, const QString &exec) {
+        bool breaks = false;
+        if (placeAfterDivider && insertIndex >= 0 && insertIndex < m_appModel->size() && m_appModel->at(insertIndex)->dockBreaksBefore()) {
+            breaks = true;
+            m_appModel->at(insertIndex)->setDockBreaksBefore(false);
+            placeAfterDivider = false;
+        }
+        addApp(id, title, icon, exec, breaks, insertIndex);
+        if (insertIndex >= 0) insertIndex++;
+    };
+
+    // 2. Folder / Directory
+    if (fi.isDir()) {
+        QString title = fi.fileName().isEmpty() ? absPath : fi.fileName();
+        QString icon = resolveFolderIcon(fi);
+        QString exec = QString("dolphin \"%1\" || xdg-open \"%1\"").arg(absPath);
+        commitAdd("dir_" + hashStr, title, icon, exec);
+        return true;
+    }
+
+    QMimeDatabase mimeDb;
+    QMimeType mime = mimeDb.mimeTypeForFile(fi);
+    QString mimeName = mime.name().toLower();
+    QString ext = fi.suffix().toLower();
+
+    static const QSet<QString> imageExts = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "svg", "ico", "avif", "tif", "tiff", "heic"};
+    static const QSet<QString> videoExts = {"mp4", "mkv", "webm", "mov", "avi", "m4v", "flv", "wmv", "mpg", "mpeg", "ts", "3gp"};
+    static const QSet<QString> audioExts = {"mp3", "flac", "wav", "ogg", "m4a", "aac", "opus", "wma", "aiff"};
+
+    // 3. Image File -> Rounded Squircle Live Thumbnail Icon
+    if (mimeName.startsWith("image/") || imageExts.contains(ext)) {
+        QImage img(absPath);
+        QString icon = !img.isNull()
+            ? createSquircleIconFromImage(img, "img_" + hashStr, false)
+            : (ext == "svg" ? ("file://" + absPath) : "qrc:/icons/photos/256.png");
+        QString title = fi.fileName();
+        QString exec = QString("gwenview \"%1\" || xdg-open \"%1\"").arg(absPath);
+        commitAdd("img_" + hashStr, title, icon, exec);
+        return true;
+    }
+
+    // 4. Video File -> Extracted Frame in Rounded Squircle + Play Badge
+    if (mimeName.startsWith("video/") || videoExts.contains(ext)) {
+        QString icon = extractVideoSquircleIcon(absPath, "vid_" + hashStr);
+        QString title = fi.fileName();
+        QString exec = QString("vlc \"%1\" || mpv \"%1\" || xdg-open \"%1\"").arg(absPath);
+        commitAdd("vid_" + hashStr, title, icon, exec);
+        return true;
+    }
+
+    // 5. Audio File -> Embedded Cover Art Squircle or Music Icon
+    if (mimeName.startsWith("audio/") || audioExts.contains(ext)) {
+        QString icon = "qrc:/icons/music/256.png";
+        QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/macos-dock/dropped_icons";
+        QDir().mkpath(cacheDir);
+        QString tmpCover = cacheDir + "/tmp_aud_" + hashStr + ".png";
+        QProcess ff;
+        ff.start("ffmpeg", {"-y", "-i", absPath, "-an", "-vcodec", "png", "-frames:v", "1", tmpCover});
+        if (ff.waitForFinished(1200) && QFile::exists(tmpCover) && QFileInfo(tmpCover).size() > 0) {
+            QImage cover(tmpCover);
+            QFile::remove(tmpCover);
+            if (!cover.isNull()) {
+                icon = createSquircleIconFromImage(cover, "aud_" + hashStr, false);
             }
         } else {
-            addAppFromText(url.toString());
+            QFile::remove(tmpCover);
+        }
+        QString title = fi.fileName();
+        QString exec = QString("elisa \"%1\" || vlc \"%1\" || xdg-open \"%1\"").arg(absPath);
+        commitAdd("aud_" + hashStr, title, icon, exec);
+        return true;
+    }
+
+    // 6. Executable / AppImage / Script
+    if (ext == "appimage" || (fi.isExecutable() && !mimeName.startsWith("text/"))) {
+        if (ext == "appimage" && !fi.isExecutable()) {
+            QFile::setPermissions(absPath, fi.permissions() | QFileDevice::ExeOwner | QFileDevice::ExeUser | QFileDevice::ExeGroup);
+        }
+        QString baseTitle = fi.completeBaseName();
+        // Clean version suffixes from AppImage names (e.g. "Obsidian-1.5.3-x86_64" -> "Obsidian")
+        if (ext == "appimage") {
+            baseTitle.remove(QRegularExpression("[-_][vV]?\\d+.*$"));
+        }
+        if (!baseTitle.isEmpty()) baseTitle[0] = baseTitle[0].toUpper();
+
+        QString icon = resolveSystemIcon(baseTitle.toLower());
+        if (icon == "qrc:/icons/launchpad/256.png" && ext != "appimage") {
+            icon = "qrc:/icons/terminal/256.png";
+        }
+        QString exec = QString("\"%1\"").arg(absPath);
+        commitAdd(baseTitle.toLower(), baseTitle, icon, exec);
+        return true;
+    }
+
+    // 7. All Other Files (PDFs, Code, Markdown, Archives, Office Docs, etc.)
+    QString title = fi.fileName();
+    QString icon = resolveMimeIcon(fi);
+    QString exec = QString("xdg-open \"%1\"").arg(absPath);
+    commitAdd("file_" + hashStr, title, icon, exec);
+    return true;
+}
+
+void DockManager::handleDrop(const QList<QUrl> &urls, const QString &text, int insertIndex, bool placeAfterDivider) {
+    qDebug() << "[DockManager] handleDrop urls:" << urls.size() << "text len:" << text.length() << "insertIndex:" << insertIndex;
+
+    int initialCount = m_appModel->size();
+    if (!urls.isEmpty()) {
+        addAppsFromUrls(urls, insertIndex, placeAfterDivider);
+    }
+
+    // If URLs did not add anything (or no URLs were provided) and text is non-empty, process text
+    if (m_appModel->size() == initialCount && !text.trimmed().isEmpty()) {
+        addAppFromText(text, insertIndex, placeAfterDivider);
+    }
+}
+
+void DockManager::addAppsFromUrls(const QList<QUrl> &urls, int insertIndex, bool placeAfterDivider) {
+    QSet<QString> seen;
+    for (const QUrl &url : urls) {
+        QString urlStr = url.toString().trimmed();
+        if (urlStr.isEmpty() || seen.contains(urlStr)) continue;
+        seen.insert(urlStr);
+
+        if (url.isLocalFile()) {
+            addSingleLocalPath(url.toLocalFile(), insertIndex, placeAfterDivider);
+        } else if (url.scheme() == "applications" || urlStr.endsWith(".desktop", Qt::CaseInsensitive)) {
+            QString desktopPath = findDesktopFilePath(urlStr);
+            if (!desktopPath.isEmpty()) {
+                addSingleLocalPath(desktopPath, insertIndex, placeAfterDivider);
+            }
+        } else if (urlStr.startsWith("data:image/", Qt::CaseInsensitive)) {
+            int commaIdx = urlStr.indexOf(',');
+            if (commaIdx > 0) {
+                QByteArray raw = QByteArray::fromBase64(urlStr.mid(commaIdx + 1).toLatin1());
+                QImage img = QImage::fromData(raw);
+                if (!img.isNull()) {
+                    qint64 ts = QDateTime::currentMSecsSinceEpoch();
+                    QString saveDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/dropped_images";
+                    QDir().mkpath(saveDir);
+                    QString imgPath = QString("%1/image_%2.png").arg(saveDir).arg(ts);
+                    img.save(imgPath, "PNG");
+                    addSingleLocalPath(imgPath, insertIndex, placeAfterDivider);
+                }
+            }
+        } else {
+            addAppFromText(urlStr, insertIndex, placeAfterDivider);
         }
     }
 }
 
-void DockManager::addAppFromText(const QString &text) {
+void DockManager::addAppFromText(const QString &text, int insertIndex, bool placeAfterDivider) {
     QString trimmed = text.trimmed();
-    if (trimmed.startsWith("http://", Qt::CaseInsensitive) || trimmed.startsWith("https://", Qt::CaseInsensitive)) {
-        QUrl url(trimmed);
+    if (trimmed.isEmpty()) return;
+
+    auto commitAdd = [&](const QString &id, const QString &title, const QString &icon, const QString &exec) {
+        bool breaks = false;
+        if (placeAfterDivider && insertIndex >= 0 && insertIndex < m_appModel->size() && m_appModel->at(insertIndex)->dockBreaksBefore()) {
+            breaks = true;
+            m_appModel->at(insertIndex)->setDockBreaksBefore(false);
+            placeAfterDivider = false;
+        }
+        addApp(id, title, icon, exec, breaks, insertIndex);
+        if (insertIndex >= 0) insertIndex++;
+    };
+
+    // 1. Check if the text is a list of file:// URLs or local paths (one per line)
+    QStringList lines = trimmed.split(QRegularExpression("[\r\n]+"), Qt::SkipEmptyParts);
+    if (!lines.isEmpty()) {
+        bool allPathsOrUrls = true;
+        for (const QString &line : lines) {
+            QString l = line.trimmed();
+            if (l.startsWith("#")) continue;
+            bool isFileUrl = l.startsWith("file://", Qt::CaseInsensitive) || l.startsWith("applications:", Qt::CaseInsensitive);
+            bool isLocalPath = (l.startsWith("/") || l.startsWith("~/")) && QFileInfo::exists(l.startsWith("~/") ? (QDir::homePath() + l.mid(1)) : l);
+            bool isDesktopName = l.endsWith(".desktop", Qt::CaseInsensitive) && !findDesktopFilePath(l).isEmpty();
+            if (!isFileUrl && !isLocalPath && !isDesktopName) {
+                allPathsOrUrls = false;
+                break;
+            }
+        }
+        if (allPathsOrUrls) {
+            for (const QString &line : lines) {
+                QString l = line.trimmed();
+                if (l.startsWith("#")) continue;
+                if (l.startsWith("file://", Qt::CaseInsensitive)) {
+                    addSingleLocalPath(QUrl(l).toLocalFile(), insertIndex, placeAfterDivider);
+                } else if (l.startsWith("applications:", Qt::CaseInsensitive) || l.endsWith(".desktop", Qt::CaseInsensitive)) {
+                    QString dp = findDesktopFilePath(l);
+                    if (!dp.isEmpty()) addSingleLocalPath(dp, insertIndex, placeAfterDivider);
+                } else {
+                    addSingleLocalPath(l, insertIndex, placeAfterDivider);
+                }
+            }
+            return;
+        }
+    }
+
+    // 2. Check if text is a Web URL (http://, https://, or single-token www.domain.tld)
+    bool isWebUrl = trimmed.startsWith("http://", Qt::CaseInsensitive)
+                 || trimmed.startsWith("https://", Qt::CaseInsensitive)
+                 || (!trimmed.contains(QRegularExpression("\\s")) && trimmed.startsWith("www.", Qt::CaseInsensitive) && trimmed.contains('.'));
+    if (isWebUrl) {
+        QString fullUrl = trimmed.startsWith("www.", Qt::CaseInsensitive) ? ("https://" + trimmed) : trimmed;
+        QUrl url(fullUrl);
         QString host = url.host();
         if (host.startsWith("www.")) host = host.mid(4);
 
@@ -435,13 +1004,53 @@ void DockManager::addAppFromText(const QString &text) {
         if (!title.isEmpty()) {
             title[0] = title[0].toUpper();
         }
+        QString pathPart = url.path();
+        if (!pathPart.isEmpty() && pathPart != "/") {
+            QString cleanSeg = QFileInfo(pathPart).fileName();
+            if (!cleanSeg.isEmpty() && cleanSeg.length() <= 20) {
+                title += " - " + cleanSeg;
+            }
+        }
 
         QString id = QString("web_%1").arg(QDateTime::currentMSecsSinceEpoch());
-        QString exec = QString("google-chrome --app=\"%1\" || xdg-open \"%1\"").arg(trimmed);
+        QString exec = QString("xdg-open \"%1\"").arg(fullUrl);
         QString icon = "qrc:/icons/safari/256.png";
 
-        addApp(id, title, icon, exec, false);
+        commitAdd(id, title, icon, exec);
+        return;
     }
+
+    // 3. Check if single-word text matches an installed .desktop application
+    if (!trimmed.contains(QRegularExpression("\\s")) && trimmed.length() <= 64) {
+        QString dp = findDesktopFilePath(trimmed);
+        if (!dp.isEmpty()) {
+            addSingleLocalPath(dp, insertIndex, placeAfterDivider);
+            return;
+        }
+    }
+
+    // 4. Plain Text / Note / Code Snippet -> Save to persistent note file & generate live Note squircle icon!
+    qint64 ts = QDateTime::currentMSecsSinceEpoch();
+    QString notesDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/notes";
+    QDir().mkpath(notesDir);
+    QString notePath = QString("%1/note_%2.txt").arg(notesDir).arg(ts);
+
+    QFile noteFile(notePath);
+    if (noteFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        noteFile.write(trimmed.toUtf8());
+        noteFile.close();
+    }
+
+    QString firstLine = lines.isEmpty() ? trimmed : lines.first().trimmed();
+    if (firstLine.length() > 28) {
+        firstLine = firstLine.left(25) + "...";
+    }
+    QString title = firstLine.isEmpty() ? "Text Note" : firstLine;
+    QString cacheKey = QString("note_%1").arg(ts);
+    QString icon = createTextSnippetIcon(trimmed, cacheKey);
+    QString exec = QString("kate \"%1\" || kwrite \"%1\" || xdg-open \"%1\"").arg(notePath);
+
+    commitAdd(cacheKey, title, icon, exec);
 }
 
 QString DockManager::getAppQuery(const QString &id) {
@@ -510,6 +1119,7 @@ void DockManager::setupKWinWindowTracker() {
 
     // Always unload any existing tracker script first to prevent duplicates
     scriptingInterface.call("unloadScript", "macos_dock_tracker");
+    QThread::msleep(40);
 
     QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(configDir);
@@ -631,6 +1241,9 @@ void DockManager::setupKWinWindowTracker() {
     QDBusInterface scriptInterface("org.kde.KWin", scriptPath, "org.kde.kwin.Script", QDBusConnection::sessionBus());
     scriptInterface.call("run");
     qDebug() << "[DockManager] Persistent KWin tracker loaded and running as Script" << m_kwinTrackerScriptId;
+
+    // Immediately trigger a one-shot query to guarantee zero startup delay
+    refreshRunningStatus();
 }
 
 void DockManager::cleanupKWinWindowTracker() {
@@ -642,17 +1255,22 @@ void DockManager::cleanupKWinWindowTracker() {
 }
 
 void DockManager::checkTrackerHealth() {
-    QDBusInterface scriptingInterface("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", QDBusConnection::sessionBus());
-    if (!scriptingInterface.isValid()) return;
+    qint64 secsSinceLast = m_lastWindowUpdateTime.isValid() ? m_lastWindowUpdateTime.secsTo(QDateTime::currentDateTime()) : 999;
 
-    QDBusReply<bool> reply = scriptingInterface.call("isScriptLoaded", "macos_dock_tracker");
-    if (!reply.isValid() || !reply.value()) {
-        qDebug() << "[DockManager] Tracker script missing in KWin, reinstalling...";
+    // Layer 1: If no update received in >= 3 seconds, query windows immediately via one-shot script
+    if (secsSinceLast >= 3) {
+        refreshRunningStatus();
+    }
+
+    // Layer 2: If no update received in >= 6 seconds, the persistent tracker has stalled or stopped. Reinstall it.
+    if (secsSinceLast >= 6) {
+        qDebug() << "[DockManager] Tracker script stalled (no updates for" << secsSinceLast << "s). Reinstalling tracker...";
         setupKWinWindowTracker();
     }
 }
 
 void DockManager::updateWindows(const QString &json) {
+    m_lastWindowUpdateTime = QDateTime::currentDateTime();
     QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
     if (doc.isArray()) {
         matchWindowsToApps(doc.array());
@@ -662,7 +1280,18 @@ void DockManager::updateWindows(const QString &json) {
 }
 
 void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
-    qDebug() << "[DockManager] matchWindowsToApps received" << windowList.size() << "windows";
+    QString currentSummary;
+    for (const QJsonValue &val : windowList) {
+        if (!val.isObject()) continue;
+        QJsonObject o = val.toObject();
+        currentSummary += QString("[%1:%2:%3]").arg(o["id"].toString(), o["desktopFile"].toString(), o["active"].toBool() ? "1" : "0");
+    }
+
+    bool stateChanged = (currentSummary != m_lastWindowSummary);
+    if (stateChanged) {
+        m_lastWindowSummary = currentSummary;
+        qDebug() << "[DockManager] matchWindowsToApps state changed, received" << windowList.size() << "windows";
+    }
 
     // Map of AppItem* -> QVariantList of window maps
     QMap<AppItem*, QVariantList> appWindows;
@@ -799,7 +1428,7 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
     // Assign windows to matched apps
     for (auto it = appWindows.begin(); it != appWindows.end(); ++it) {
         it.key()->setWindows(it.value());
-        if (it.key()->id() == "terminal" || it.key()->windowCount() > 0) {
+        if (stateChanged && (it.key()->id() == "terminal" || it.key()->windowCount() > 0)) {
             qDebug() << "[DockManager] App assigned:" << it.key()->id() << "windows:" << it.key()->windowCount();
         }
         if (it.key()->windowCount() > 0 && m_launchingAppIds.contains(it.key()->id())) {
@@ -809,9 +1438,11 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
         }
     }
 
-    for (const auto &uw : unassigned) {
-        if (uw.desktopFile.contains("konsole") || uw.resourceClass.contains("konsole") || uw.resourceName.contains("konsole")) {
-            qDebug() << "[DockManager] UNASSIGNED KONSOLE WINDOW:" << uw.id << uw.desktopFile << uw.resourceClass << uw.caption;
+    if (stateChanged) {
+        for (const auto &uw : unassigned) {
+            if (uw.desktopFile.contains("konsole") || uw.resourceClass.contains("konsole") || uw.resourceName.contains("konsole")) {
+                qDebug() << "[DockManager] UNASSIGNED KONSOLE WINDOW:" << uw.id << uw.desktopFile << uw.resourceClass << uw.caption;
+            }
         }
     }
 
@@ -867,22 +1498,18 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
                 cleanKey.chop(8);
             }
 
-            // Search desktop files for real name & icon
-            QString desktopPath = "/usr/share/applications/" + cleanKey + ".desktop";
-            if (!QFile::exists(desktopPath)) {
-                desktopPath = "/usr/share/applications/org.kde." + cleanKey + ".desktop";
-            }
-            if (!QFile::exists(desktopPath)) {
-                desktopPath = QDir::homePath() + "/.local/share/applications/" + cleanKey + ".desktop";
-            }
-            if (!QFile::exists(desktopPath)) {
-                desktopPath = "/var/lib/flatpak/exports/share/applications/" + cleanKey + ".desktop";
-            }
-            if (!QFile::exists(desktopPath)) {
-                desktopPath = QDir::homePath() + "/.local/share/flatpak/exports/share/applications/" + cleanKey + ".desktop";
+            // Search desktop files for real name & icon using full unified lookup
+            QString desktopPath = findDesktopFilePath(cleanKey);
+            if (desktopPath.isEmpty() && !wins.isEmpty()) {
+                if (!wins.first().resourceClass.isEmpty()) {
+                    desktopPath = findDesktopFilePath(wins.first().resourceClass);
+                }
+                if (desktopPath.isEmpty() && !wins.first().resourceName.isEmpty()) {
+                    desktopPath = findDesktopFilePath(wins.first().resourceName);
+                }
             }
 
-            if (QFile::exists(desktopPath)) {
+            if (!desktopPath.isEmpty() && QFile::exists(desktopPath)) {
                 QString dTitle, dIcon, dExec;
                 parseDesktopFile(desktopPath, dTitle, dIcon, dExec);
                 if (!dTitle.isEmpty()) title = dTitle;
@@ -890,7 +1517,9 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
                 if (!dExec.isEmpty()) exec = dExec;
             } else {
                 iconName = resolveSystemIcon(key);
-                if (title.isEmpty()) title = key;
+                if (title.isEmpty()) {
+                    title = (!wins.isEmpty() && !wins.first().resourceClass.isEmpty()) ? wins.first().resourceClass : key;
+                }
                 if (!title.isEmpty()) title[0] = title[0].toUpper();
             }
 
@@ -1086,6 +1715,22 @@ void DockManager::launchOrToggleApp(const QString &id) {
 }
 
 void DockManager::launchNewInstance(const QString &id) {
+    bool isResourceItem = id.startsWith("dir_") || id.startsWith("img_") || id.startsWith("vid_") ||
+                          id.startsWith("aud_") || id.startsWith("file_") || id.startsWith("note_") ||
+                          id.startsWith("web_") || id == "view-source" || id == "wallpapers";
+
+    if (isResourceItem) {
+        emit appSwitched(id);
+        emit appLaunched(id);
+        for (AppItem *item : m_appModel->items()) {
+            if (item && item->id() == id) {
+                launchCommand(item->execCommand());
+                return;
+            }
+        }
+        return;
+    }
+
     if (m_launchingAppIds.contains(id)) {
         return;
     }

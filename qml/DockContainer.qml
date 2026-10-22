@@ -7,11 +7,18 @@ Item {
     property var dockMouseX: null // null when mouse is outside the dock
     property bool isMouseInside: false
     property bool isReady: false  // becomes true after initial items populate (no morph-in on startup)
+    property bool isAnyDragging: false
     property alias itemsRowRef: itemsRow
+
+    function wakePhysicsTicker() {
+        physicsTicker.running = true;
+    }
 
     onDockMouseXChanged: {
         if (dockMouseX === null) {
             root.isMouseInside = false;
+        } else {
+            physicsTicker.running = true;
         }
     }
 
@@ -25,6 +32,61 @@ Item {
 
     function requestMaskUpdate() {
         updateMaskTimer.restart();
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Smooth Drag-to-Rearrange Slot Swapping (Zero Ping-Pong + Glide)
+    // ────────────────────────────────────────────────────────────────
+    function checkDragSwap(draggedItem, targetCenterWinX) {
+        if (!draggedItem || !draggedItem.isDragging || draggedItem.isMarkedForRemoval) return;
+
+        var fromIndex = draggedItem.itemIndex;
+        var count = itemsRepeater.count;
+        if (fromIndex < 0 || fromIndex >= count) return;
+
+        // Check right neighbor
+        if (fromIndex + 1 < count) {
+            var rightDel = itemsRepeater.itemAt(fromIndex + 1);
+            var rightItem = rightDel ? rightDel.dockItemInstance : null;
+            if (rightItem && (!rightItem.appData || !rightItem.appData.isRemoving)) {
+                var rightSlotCenterX = rightItem.mapToItem(null, rightItem.width / 2, 0).x;
+                if (targetCenterWinX > rightSlotCenterX + 4) {
+                    performDragSwap(fromIndex, fromIndex + 1, draggedItem, rightItem, targetCenterWinX);
+                    return;
+                }
+            }
+        }
+
+        // Check left neighbor
+        if (fromIndex - 1 >= 0) {
+            var leftDel = itemsRepeater.itemAt(fromIndex - 1);
+            var leftItem = leftDel ? leftDel.dockItemInstance : null;
+            if (leftItem && (!leftItem.appData || !leftItem.appData.isRemoving)) {
+                var leftSlotCenterX = leftItem.mapToItem(null, leftItem.width / 2, 0).x;
+                if (targetCenterWinX < leftSlotCenterX - 4) {
+                    performDragSwap(fromIndex, fromIndex - 1, draggedItem, leftItem, targetCenterWinX);
+                    return;
+                }
+            }
+        }
+    }
+
+    function performDragSwap(fromIndex, toIndex, draggedItem, neighborItem, targetCenterWinX) {
+        // 1. Capture neighbor's current visual center X in window space before the swap
+        var neighborOldVisualX = neighborItem.mapToItem(null, neighborItem.width / 2, 0).x + neighborItem.swapSlideX;
+
+        // 2. Move in model and immediately update Row layout synchronously
+        dockManager.moveApp(fromIndex, toIndex);
+        itemsRow.forceLayout();
+
+        // 3. Neighbor is now at fromIndex; glide it smoothly from its old visual X to its new slot X
+        var neighborNewSlotX = neighborItem.mapToItem(null, neighborItem.width / 2, 0).x;
+        neighborItem.triggerSwapGlide(neighborOldVisualX - neighborNewSlotX);
+
+        // 4. Dragged item is now at toIndex; sync its dragOffsetX so its visual X stays 100% locked to cursor
+        var draggedNewSlotX = draggedItem.mapToItem(null, draggedItem.width / 2, 0).x;
+        draggedItem.dragOffsetX = targetCenterWinX - draggedNewSlotX;
+        physicsTicker.running = true;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -93,6 +155,7 @@ Item {
             if (count === 0) return;
 
             var needsLayout = false;
+            var draggedInstance = null;
 
             for (var i = 0; i < count; ++i) {
                 var delegate = itemsRepeater.itemAt(i);
@@ -100,13 +163,21 @@ Item {
                 var dockItem = delegate.dockItemInstance;
                 if (!dockItem) continue;
 
-                // ── LIVE distance, exactly like Svelte's getBoundingClientRect() ──
+                if (dockItem.isDragging) {
+                    draggedInstance = dockItem;
+                }
+
+                // ── LIVE distance, using visual center so swaps have zero magnification jump ──
                 var targetW = root.baseWidth;
                 if (root.dockMouseX !== null && (!dockItem.appData || !dockItem.appData.isRemoving)) {
-                    // Use the IMAGE center (live), same as Svelte's image_el.getBoundingClientRect()
-                    var imgCenter = dockItem.mapToItem(null, dockItem.width / 2, 0);
-                    var dist = Math.abs(root.dockMouseX - imgCenter.x);
-                    targetW = root.calcTargetWidth(dist);
+                    if (dockItem.isDragging) {
+                        targetW = root.calcTargetWidth(0);
+                    } else {
+                        var imgCenter = dockItem.mapToItem(null, dockItem.width / 2, 0);
+                        var visualCenterX = imgCenter.x + dockItem.swapSlideX;
+                        var dist = Math.abs(root.dockMouseX - visualCenterX);
+                        targetW = root.calcTargetWidth(dist);
+                    }
                 }
 
                 var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
@@ -120,6 +191,14 @@ Item {
             // Force Row to reposition siblings when widths change
             if (needsLayout) {
                 itemsRow.forceLayout();
+            } else if (root.dockMouseX === null && !draggedInstance) {
+                // All icons have reached base width and mouse is away — sleep ticker to save CPU
+                physicsTicker.running = false;
+            }
+
+            // Keep dragged icon 100% locked to cursor even as sibling widths settle
+            if (draggedInstance) {
+                draggedInstance.syncDragPosition();
             }
         }
     }
@@ -157,10 +236,10 @@ Item {
 
     // Extra padding on sides so magnified edge icons aren't clipped
     width: dockPill.width + 200
-    height: 220
+    height: 290
 
     // ────────────────────────────────────────────────────────────────
-    // LAYER 1: Full-Width Magnification Tracker (entire 220px height)
+    // LAYER 1: Full-Width Magnification Tracker (entire height)
     //
     // This ONLY tracks dockMouseX for the magnification spring.
     // It does NOT control isMouseInside (auto-hide).
@@ -185,12 +264,10 @@ Item {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // LAYER 2: Dock Pill Hover Zone (pill + magnified icon overflow)
+    // LAYER 2: Dock Pill Hover Zone (pill + magnified icon overflow + preview popup)
     //
     // This controls isMouseInside for auto-hide.
-    // Height = pill(68) + max magnified overflow(~60) + padding(22) ≈ 150px
-    // Anchored to the bottom, so it covers the pill and magnified icons
-    // but NOT the empty space above — just like Svelte's dock-el.
+    // Anchored to the bottom, covering pill, magnified icons, and preview cards.
     // ────────────────────────────────────────────────────────────────
     MouseArea {
         id: pillHoverZone
@@ -199,7 +276,7 @@ Item {
         anchors.right: dockPill.right
         anchors.leftMargin: -20
         anchors.rightMargin: -20
-        height: 150
+        height: 245
         hoverEnabled: true
         acceptedButtons: Qt.RightButton
         propagateComposedEvents: true
@@ -228,16 +305,70 @@ Item {
         }
     }
 
-    // Outer Ambient Shadow
-    Rectangle {
-        id: shadowGlow
-        anchors.centerIn: dockPill
-        anchors.verticalCenterOffset: 3
-        width: dockPill.width + 10
-        height: dockPill.height + 6
-        radius: 20
-        color: Qt.rgba(0, 0, 0, 0.32)
-        z: 1
+    function calcDropTarget(windowX) {
+        var count = itemsRepeater.count;
+        if (count === 0) return { index: -1, afterDivider: false };
+
+        for (var i = 0; i < count; ++i) {
+            var del = itemsRepeater.itemAt(i);
+            if (!del || !del.dockItemInstance) continue;
+            var item = del.dockItemInstance;
+            var centerWinX = item.mapToItem(null, item.width / 2, 0).x;
+            if (windowX < centerWinX) {
+                var afterDiv = false;
+                if (item.appData && item.appData.dockBreaksBefore) {
+                    var divWinX = del.mapToItem(null, 8, 0).x;
+                    if (windowX >= divWinX) {
+                        afterDiv = true;
+                    }
+                }
+                return { index: i, afterDivider: afterDiv };
+            }
+        }
+        return { index: count, afterDivider: false };
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // LAYER 3: Universal External Drag & Drop Zone (Apps, Files, Media, Folders, Text)
+    // ────────────────────────────────────────────────────────────────
+    DropArea {
+        id: universalDropArea
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 245
+        z: 2000
+
+        onEntered: (drag) => {
+            drag.accept();
+            var pt = mapToItem(null, drag.x, drag.y);
+            root.dockMouseX = pt.x;
+            root.isMouseInside = true;
+        }
+
+        onPositionChanged: (drag) => {
+            drag.accept();
+            var pt = mapToItem(null, drag.x, drag.y);
+            root.dockMouseX = pt.x;
+            root.isMouseInside = true;
+        }
+
+        onExited: {
+            root.dockMouseX = null;
+            root.isMouseInside = false;
+        }
+
+        onDropped: (drop) => {
+            var pt = mapToItem(null, drop.x, drop.y);
+            var target = root.calcDropTarget(pt.x);
+            var urls = drop.hasUrls ? drop.urls : [];
+            var text = drop.hasText ? drop.text : "";
+
+            if (urls.length > 0 || text.length > 0) {
+                dockManager.handleDrop(urls, text, target.index, target.afterDivider);
+                drop.accept();
+            }
+        }
     }
 
     // Frosted Glass Dock Container Pill
@@ -272,24 +403,6 @@ Item {
             color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.25) : Qt.rgba(1, 1, 1, 0.65)
         }
 
-        // Drag & Drop Area
-        DropArea {
-            anchors.fill: parent
-            z: 3
-            onEntered: (drag) => {
-                root.isMouseInside = true;
-            }
-            onDropped: (drop) => {
-                if (drop.hasUrls) {
-                    dockManager.addAppsFromUrls(drop.urls);
-                    drop.acceptProposedAction();
-                } else if (drop.hasText) {
-                    dockManager.addAppFromText(drop.text);
-                    drop.acceptProposedAction();
-                }
-            }
-        }
-
         // Row of Dock Items
         Row {
             id: itemsRow
@@ -310,6 +423,7 @@ Item {
                     spacing: 5
                     anchors.bottom: parent ? parent.bottom : undefined
                     clip: false
+                    z: dockItem.isDragging ? 500 : 1
 
                     property alias dockItemInstance: dockItem
 

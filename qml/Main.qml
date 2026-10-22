@@ -28,14 +28,14 @@ Window {
     // Window is ALWAYS 220px × fullWidth. We MOVE it up/down instead.
     // Moving = no GPU buffer realloc = no black square flicker.
     width: realScreenWidth
-    height: 220
+    height: 290
     x: 0
-    y: realScreenHeight - 220  // starts fully visible
+    y: realScreenHeight - 290  // starts fully visible
 
     // ── Auto-Hide State ──
     property bool dockVisible: true
     property real dockSlideOffset: 0       // 0 = visible, slideDistance = hidden
-    readonly property int slideDistance: 180
+    readonly property int slideDistance: 210
 
     // ═══════════════════════════════════════════════════════════════
     // HIDE: Slide content below window, then move window down so
@@ -149,7 +149,7 @@ Window {
             dockContainer.opacity = 0;
 
             // MOVE window to full-visible position (no resize!)
-            root.y = realScreenHeight - 220;
+            root.y = realScreenHeight - 290;
 
             // Wait for compositor to settle, then show + animate
             revealSettleTimer.restart();
@@ -190,6 +190,24 @@ Window {
         onPositionChanged: {
             if (!root.dockVisible) {
                 root.dockVisible = true;
+            }
+        }
+
+        DropArea {
+            anchors.fill: parent
+            onEntered: (drag) => {
+                drag.accept();
+                dockContainer.isMouseInside = true;
+                if (!root.dockVisible) {
+                    root.dockVisible = true;
+                }
+            }
+            onPositionChanged: (drag) => {
+                drag.accept();
+                dockContainer.isMouseInside = true;
+                if (!root.dockVisible) {
+                    root.dockVisible = true;
+                }
             }
         }
     }

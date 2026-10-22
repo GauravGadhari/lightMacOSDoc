@@ -10,8 +10,11 @@
 #include <csignal>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <QDBusUnixFileDescriptor>
 #include <QSocketNotifier>
 #include "dock_manager.h"
+#include "window_preview_provider.h"
 
 static int sigTermFd[2];
 
@@ -28,6 +31,7 @@ int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("macOS Dock");
     app.setOrganizationName("Antigravity");
+    app.setDesktopFileName("macos-dock");
     app.setWindowIcon(QIcon(":/icons/finder/256.png"));
 
     // Prevent KDE Plasma Session Manager (ksmserver) from saving/restoring this process on logout/reboot
@@ -99,6 +103,7 @@ int main(int argc, char *argv[]) {
     int screenHeight = screen ? screen->geometry().height() : 1200;
 
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QStringLiteral("windowpreview"), new WindowPreviewProvider());
     engine.rootContext()->setContextProperty("dockManager", &dockManager);
     engine.rootContext()->setContextProperty("realScreenWidth", screenWidth);
     engine.rootContext()->setContextProperty("realScreenHeight", screenHeight);

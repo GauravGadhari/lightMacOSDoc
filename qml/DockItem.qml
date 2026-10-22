@@ -16,14 +16,60 @@ Item {
     // Items start at 1.0. Dynamically added items set to 0.0 and animate in onCompleted.
     property real morphProgress: 1.0
 
-    // Hovered = dockMouseX is within this item's horizontal span
+    // Hovered = dockMouseX is within this item's horizontal span (disabled on other items while dragging)
     property bool isHovered: {
         if (!dockContainerRef || dockContainerRef.dockMouseX === null) return false;
+        if (dockContainerRef.isAnyDragging && !root.isDragging) return false;
         var center = mapToItem(null, width / 2, 0).x;
         return Math.abs(dockContainerRef.dockMouseX - center) < (width / 2);
     }
     property bool isDragging: false
     property bool isMarkedForRemoval: false
+
+    // ── Smooth Drag & Neighbor Swap Glide Offsets ──
+    property real dragOffsetX: 0.0
+    property real dragOffsetY: 0.0
+    property real dragTargetCenterWinX: 0.0
+    property real swapSlideX: 0.0
+
+    NumberAnimation {
+        id: swapSlideAnim
+        target: root
+        property: "swapSlideX"
+        to: 0.0
+        duration: 220
+        easing.type: Easing.OutCubic
+    }
+
+    ParallelAnimation {
+        id: snapBackAnim
+        NumberAnimation {
+            target: root
+            property: "dragOffsetX"
+            to: 0.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            target: root
+            property: "dragOffsetY"
+            to: 0.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    function triggerSwapGlide(initialOffset) {
+        swapSlideAnim.stop();
+        swapSlideX = initialOffset;
+        swapSlideAnim.restart();
+    }
+
+    function syncDragPosition() {
+        if (!isDragging) return;
+        var slotCenterWinX = root.mapToItem(null, root.width / 2, 0).x;
+        root.dragOffsetX = root.dragTargetCenterWinX - slotCenterWinX;
+    }
 
     width: currentWidth * morphProgress
     height: currentWidth
@@ -199,13 +245,61 @@ Item {
         }
     }
 
-    // Tooltip
+    // ── Hover Debounce for Preview ──
+    // Prevents flickering when rapidly scanning across dock icons
+    Timer {
+        id: previewDebounce
+        property bool showIt: false
+        interval: 200
+        repeat: false
+        onTriggered: showIt = true
+    }
+
+    // Track hover state changes to control debounce
+    onIsHoveredChanged: {
+        if (isHovered && appData && appData.windowCount > 0 && !isDragging) {
+            previewDebounce.restart();
+        } else {
+            previewDebounce.stop();
+            previewDebounce.showIt = false;
+        }
+    }
+
+    // ── Window Preview Popup (lazy loaded only when hovered) ──
+    Loader {
+        id: windowPreviewLoader
+        anchors.horizontalCenter: parent.horizontalCenter
+        active: previewDebounce.showIt
+                && !contextMenu.visible
+                && !dockManager.isMenuOpen
+                && !root.isDragging
+                && !root.isMarkedForRemoval
+                && root.appData
+                && root.appData.windowCount > 0
+        z: 300
+
+        sourceComponent: WindowPreviewPopup {
+            appData: root.appData
+            appIcon: root.appData ? root.appData.icon : ""
+            showPreview: windowPreviewLoader.active
+        }
+    }
+
+    // ── Simple Tooltip (for non-running apps, or while dragging) ──
     Tooltip {
         id: tooltip
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.isMarkedForRemoval ? "Remove from Dock" : (appData ? appData.title : "")
-        visibleTooltip: (root.isHovered || root.isDragging) && !contextMenu.visible && !dockManager.isMenuOpen
+        visibleTooltip: (root.isHovered || root.isDragging)
+                        && !contextMenu.visible
+                        && !dockManager.isMenuOpen
+                        && (root.isDragging || root.isMarkedForRemoval || !appData || appData.windowCount === 0)
         z: 300
+
+        transform: Translate {
+            x: root.dragOffsetX + root.swapSlideX
+            y: root.dragOffsetY
+        }
     }
 
     // Icon Container
@@ -218,23 +312,32 @@ Item {
         clip: false
         transformOrigin: Item.Bottom
 
-        property real removalScale: root.isMarkedForRemoval ? 0.8 : 1.0
-        property real removalOpacity: root.isMarkedForRemoval ? 0.45 : (root.isDragging ? 0.8 : 1.0)
-        Behavior on removalScale { NumberAnimation { duration: 150 } }
-        Behavior on removalOpacity { NumberAnimation { duration: 150 } }
+        property real removalScale: root.isMarkedForRemoval ? 0.82 : (root.isDragging ? 1.05 : 1.0)
+        property real removalOpacity: root.isMarkedForRemoval ? 0.5 : 1.0
+        Behavior on removalScale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+        Behavior on removalOpacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
         opacity: Math.max(0.0, root.morphProgress * removalOpacity)
         scale: Math.max(0.01, root.morphProgress * removalScale)
 
-        transform: Translate {
-            id: bounceTranslate
-            y: 0
-        }
+        transform: [
+            Translate {
+                id: bounceTranslate
+                y: 0
+            },
+            Translate {
+                id: dragTranslate
+                x: root.dragOffsetX + root.swapSlideX
+                y: root.dragOffsetY
+            }
+        ]
 
         Image {
             id: iconImage
             anchors.fill: parent
             source: appData ? appData.icon : ""
+            sourceSize.width: 256
+            sourceSize.height: 256
             fillMode: Image.PreserveAspectFit
             smooth: true
             mipmap: true
@@ -277,6 +380,10 @@ Item {
         anchors.top: parent.bottom
         anchors.topMargin: 2
 
+        transform: Translate {
+            x: root.swapSlideX
+        }
+
         color: {
             if (isActiveApp) {
                 // Vibrant Apple Blue for the active focused app window
@@ -303,46 +410,64 @@ Item {
         enabled: !(appData && appData.isRemoving)
         cursorShape: root.isDragging ? Qt.ClosedHandCursor : Qt.PointingHandCursor
 
-        property real pressX: 0
-        property real pressY: 0
+        property real pressWinX: 0
+        property real pressWinY: 0
+        property real grabOffsetX: 0
         property bool dragTriggered: false
 
         onPressed: (mouse) => {
             if (mouse.button === Qt.LeftButton) {
-                pressX = mouse.x;
-                pressY = mouse.y;
+                var winPt = root.mapToItem(null, mouse.x, mouse.y);
+                var slotCenterWin = root.mapToItem(null, root.width / 2, root.height / 2);
+                pressWinX = winPt.x;
+                pressWinY = winPt.y;
+                grabOffsetX = winPt.x - slotCenterWin.x;
                 dragTriggered = false;
+                snapBackAnim.stop();
             }
         }
 
         onPositionChanged: (mouse) => {
+            var winPt = root.mapToItem(null, mouse.x, mouse.y);
+
             // Forward mouse X to container for magnification
             if (dockContainerRef) {
-                var pt = mapToItem(null, mouse.x, mouse.y);
-                dockContainerRef.dockMouseX = pt.x;
+                dockContainerRef.dockMouseX = winPt.x;
                 dockContainerRef.isMouseInside = true;
             }
 
             if (pressedButtons & Qt.LeftButton) {
-                var dx = mouse.x - pressX;
-                var dy = mouse.y - pressY;
+                var dx = winPt.x - pressWinX;
+                var dy = winPt.y - pressWinY;
 
-                if (!dragTriggered && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+                if (!dragTriggered && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
                     dragTriggered = true;
                     root.isDragging = true;
+                    if (dockContainerRef) {
+                        dockContainerRef.isAnyDragging = true;
+                        dockContainerRef.wakePhysicsTicker();
+                    }
+                    swapSlideAnim.stop();
+                    root.swapSlideX = 0.0;
                 }
 
                 if (dragTriggered) {
-                    root.isMarkedForRemoval = (mouse.y < -70);
-                    if (!root.isMarkedForRemoval) {
-                        if (dx > root.width * 0.75) {
-                            dockManager.moveApp(root.itemIndex, root.itemIndex + 1);
-                            pressX = mouse.x;
-                        } else if (dx < -root.width * 0.75) {
-                            dockManager.moveApp(root.itemIndex, root.itemIndex - 1);
-                            pressX = mouse.x;
-                        }
+                    root.dragTargetCenterWinX = winPt.x - grabOffsetX;
+
+                    // Tactile rail damping when sliding along dock, 1:1 vertical lift when pulling up to remove
+                    if (dy < -30) {
+                        root.dragOffsetY = dy + 18;
+                    } else {
+                        root.dragOffsetY = Math.max(-12, Math.min(6, dy * 0.35));
                     }
+
+                    root.isMarkedForRemoval = (dy < -75);
+
+                    if (!root.isMarkedForRemoval && dockContainerRef) {
+                        dockContainerRef.checkDragSwap(root, root.dragTargetCenterWinX);
+                    }
+
+                    root.syncDragPosition();
                 }
             }
         }
@@ -350,12 +475,19 @@ Item {
         onReleased: (mouse) => {
             if (mouse.button === Qt.LeftButton) {
                 if (dragTriggered) {
-                    if (root.isMarkedForRemoval) {
-                        if (appData) dockManager.removeAppById(appData.id);
-                    }
+                    var wasMarkedForRemoval = root.isMarkedForRemoval;
                     root.isDragging = false;
                     root.isMarkedForRemoval = false;
                     dragTriggered = false;
+                    if (dockContainerRef) {
+                        dockContainerRef.isAnyDragging = false;
+                    }
+
+                    if (wasMarkedForRemoval) {
+                        if (appData) dockManager.removeAppById(appData.id);
+                    } else {
+                        snapBackAnim.restart();
+                    }
                 } else {
                     if (appData) {
                         dockManager.launchOrToggleApp(appData.id);
@@ -368,6 +500,10 @@ Item {
             root.isDragging = false;
             root.isMarkedForRemoval = false;
             dragTriggered = false;
+            if (dockContainerRef) {
+                dockContainerRef.isAnyDragging = false;
+            }
+            snapBackAnim.restart();
         }
 
         onClicked: (mouse) => {

@@ -13,6 +13,7 @@
 #include <QTemporaryFile>
 #include <QVariantList>
 #include <QSet>
+#include <QDateTime>
 #include "app_item.h"
 #include "app_list_model.h"
 
@@ -61,9 +62,10 @@ public:
     Q_INVOKABLE void moveApp(int fromIndex, int toIndex);
     Q_INVOKABLE void removeApp(int index);
     Q_INVOKABLE void removeAppById(const QString &id);
-    Q_INVOKABLE void addApp(const QString &id, const QString &title, const QString &icon, const QString &execCommand, bool dockBreaksBefore = false);
-    Q_INVOKABLE void addAppsFromUrls(const QList<QUrl> &urls);
-    Q_INVOKABLE void addAppFromText(const QString &text);
+    Q_INVOKABLE void addApp(const QString &id, const QString &title, const QString &icon, const QString &execCommand, bool dockBreaksBefore = false, int insertIndex = -1);
+    Q_INVOKABLE void addAppsFromUrls(const QList<QUrl> &urls, int insertIndex = -1, bool placeAfterDivider = false);
+    Q_INVOKABLE void addAppFromText(const QString &text, int insertIndex = -1, bool placeAfterDivider = false);
+    Q_INVOKABLE void handleDrop(const QList<QUrl> &urls, const QString &text, int insertIndex = -1, bool placeAfterDivider = false);
     Q_INVOKABLE void toggleDividerBefore(const QString &id);
     Q_INVOKABLE void resetToDefaultApps();
     Q_INVOKABLE void cleanupKWinWindowTracker();
@@ -110,6 +112,14 @@ private:
     QString configFilePath() const;
     QString parseDesktopFile(const QString &path, QString &title, QString &icon, QString &exec);
     QString resolveSystemIcon(const QString &iconName);
+    QString findDesktopFilePath(const QString &nameOrPath);
+    QString resolveFolderIcon(const class QFileInfo &fi);
+    QString resolveMimeIcon(const class QFileInfo &fi);
+    QString createSquircleIconFromImage(const class QImage &srcImg, const QString &cacheKey, bool addVideoPlayBadge = false);
+    QString extractVideoSquircleIcon(const QString &videoPath, const QString &cacheKey);
+    QString createTextSnippetIcon(const QString &text, const QString &cacheKey);
+    QString createDocumentBadgeIcon(const QString &ext, const QString &cacheKey);
+    bool addSingleLocalPath(const QString &localPath, int &insertIndex, bool &placeAfterDivider);
     QString getAppQuery(const QString &id);
     void setupKWinWindowTracker();
     void checkTrackerHealth();
@@ -127,4 +137,6 @@ private:
     bool m_isMenuOpen = false;
     double m_baseIconWidth = 57.6;
     double m_maxMagnification = 2.0;
+    QDateTime m_lastWindowUpdateTime;
+    QString m_lastWindowSummary;
 };

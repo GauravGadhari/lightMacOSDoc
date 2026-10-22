@@ -28,6 +28,8 @@ qt_add_executable(macos-dock-qt6
     src/app_list_model.cpp
     src/dock_manager.h
     src/dock_manager.cpp
+    src/window_preview_provider.h
+    src/window_preview_provider.cpp
     resources.qrc
 )
 
