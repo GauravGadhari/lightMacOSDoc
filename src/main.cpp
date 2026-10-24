@@ -15,6 +15,7 @@
 #include <QSocketNotifier>
 #include "dock_manager.h"
 #include "window_preview_provider.h"
+#include <QPixmapCache>
 
 static int sigTermFd[2];
 
@@ -103,7 +104,14 @@ int main(int argc, char *argv[]) {
     int screenHeight = screen ? screen->geometry().height() : 1200;
 
     QQmlApplicationEngine engine;
-    engine.addImageProvider(QStringLiteral("windowpreview"), new WindowPreviewProvider());
+    // Cap global pixmap cache to 16MB (specified in KB) to prevent unbounded memory growth
+    QPixmapCache::setCacheLimit(16 * 1024);
+
+    auto *previewProvider = new WindowPreviewProvider();
+    engine.addImageProvider(QStringLiteral("windowpreview"), previewProvider);
+    dockManager.setPreviewProvider(previewProvider);
+    dockManager.setQmlEngine(&engine);
+
     engine.rootContext()->setContextProperty("dockManager", &dockManager);
     engine.rootContext()->setContextProperty("realScreenWidth", screenWidth);
     engine.rootContext()->setContextProperty("realScreenHeight", screenHeight);

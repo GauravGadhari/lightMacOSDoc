@@ -17,6 +17,9 @@
 #include "app_item.h"
 #include "app_list_model.h"
 
+class WindowPreviewProvider;
+class QQmlApplicationEngine;
+
 class DockManager : public QObject {
     Q_OBJECT
     Q_CLASSINFO("D-Bus Interface", "org.kde.MacOSDock")
@@ -57,6 +60,10 @@ public:
     Q_INVOKABLE void updateMask(int x, int y, int width, int height);
     Q_INVOKABLE void resetMask();
     Q_INVOKABLE void setAutoHidden(bool hidden);
+    Q_INVOKABLE void trimMemory();
+
+    void setPreviewProvider(WindowPreviewProvider *provider) { m_previewProvider = provider; }
+    void setQmlEngine(QQmlApplicationEngine *engine) { m_qmlEngine = engine; }
 
     // ── Customization & Management ──
     Q_INVOKABLE void moveApp(int fromIndex, int toIndex);
@@ -128,6 +135,8 @@ private:
     bool runKWinScript(const QString &scriptCode, QString *outResult = nullptr);
 
     AppListModel *m_appModel = nullptr;
+    WindowPreviewProvider *m_previewProvider = nullptr;
+    QQmlApplicationEngine *m_qmlEngine = nullptr;
     QSet<QString> m_launchingAppIds;
     QTimer *m_pollTimer = nullptr;
     QQuickWindow *m_window = nullptr;

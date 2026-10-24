@@ -181,7 +181,13 @@ Item {
                 }
 
                 var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
-                if (Math.abs(dockItem.currentWidth - nextW) > 0.005) {
+                if (root.dockMouseX === null && Math.abs(dockItem.currentWidth - root.baseWidth) < 0.05 && Math.abs(nextW - root.baseWidth) < 0.05) {
+                    if (dockItem.currentWidth !== root.baseWidth) {
+                        dockItem.lastWidth = root.baseWidth;
+                        dockItem.currentWidth = root.baseWidth;
+                        needsLayout = true;
+                    }
+                } else if (Math.abs(dockItem.currentWidth - nextW) > 0.005) {
                     dockItem.lastWidth = dockItem.currentWidth;
                     dockItem.currentWidth = nextW;
                     needsLayout = true;

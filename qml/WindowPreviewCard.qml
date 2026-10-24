@@ -129,7 +129,8 @@ Item {
                 anchors.margins: 2
                 source: root.windowId !== "" ? ("image://windowpreview/" + root.windowId) : ""
                 asynchronous: true
-                cache: true
+                cache: false
+                sourceSize: Qt.size(240, 150)
                 fillMode: Image.PreserveAspectFit
                 smooth: true
                 mipmap: true

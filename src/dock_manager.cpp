@@ -1,4 +1,9 @@
 #include "dock_manager.h"
+#include "window_preview_provider.h"
+#include <QQmlApplicationEngine>
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -46,6 +51,16 @@ DockManager::DockManager(QObject *parent) : QObject(parent) {
     m_pollTimer = new QTimer(this);
     connect(m_pollTimer, &QTimer::timeout, this, &DockManager::checkTrackerHealth);
     m_pollTimer->start(2000);
+
+    // Periodic memory trimming (every 10 minutes) to keep idle RAM bounded
+    auto *idleTrimTimer = new QTimer(this);
+    idleTrimTimer->setInterval(10 * 60 * 1000);
+    connect(idleTrimTimer, &QTimer::timeout, this, [this]() {
+        if (m_isAutoHidden || !m_isMenuOpen) {
+            trimMemory();
+        }
+    });
+    idleTrimTimer->start();
 }
 
 DockManager::~DockManager() {
@@ -106,6 +121,31 @@ void DockManager::dismissAllMenus() {
 void DockManager::setAutoHidden(bool hidden) {
     m_isAutoHidden = hidden;
     qDebug() << "[DockManager] setAutoHidden called:" << hidden;
+    if (hidden) {
+        QTimer::singleShot(800, this, &DockManager::trimMemory);
+    }
+}
+
+void DockManager::trimMemory() {
+    if (m_qmlEngine) {
+        m_qmlEngine->collectGarbage();
+        m_qmlEngine->trimComponentCache();
+    }
+    if (m_previewProvider) {
+        QSet<QString> activeWinIds;
+        for (AppItem *item : m_appModel->items()) {
+            if (item) {
+                for (const QVariant &v : item->windows()) {
+                    QString id = v.toMap().value("id").toString();
+                    if (!id.isEmpty()) activeWinIds.insert(id);
+                }
+            }
+        }
+        m_previewProvider->pruneTo(activeWinIds);
+    }
+#if defined(__GLIBC__)
+    malloc_trim(0);
+#endif
 }
 
 void DockManager::updateMask(int x, int y, int width, int height) {
@@ -1591,6 +1631,19 @@ void DockManager::matchWindowsToApps(const QJsonArray &windowList) {
         }
     }
 
+    if (m_previewProvider) {
+        QSet<QString> activeWinIds;
+        for (AppItem *item : m_appModel->items()) {
+            if (item) {
+                for (const QVariant &v : item->windows()) {
+                    QString id = v.toMap().value("id").toString();
+                    if (!id.isEmpty()) activeWinIds.insert(id);
+                }
+            }
+        }
+        m_previewProvider->pruneTo(activeWinIds);
+    }
+
     if (structureChanged) {
         emit appsChanged();
     }
@@ -1967,7 +2020,12 @@ void DockManager::setMaxMagnification(double mag) {
 void DockManager::launchCommand(const QString &command) {
     if (command.isEmpty()) return;
     qDebug() << "Launching command detached:" << command;
-    QProcess::startDetached("sh", QStringList() << "-c" << QString("( %1 ) >/dev/null 2>&1 &").arg(command));
+    // Launch via systemd-run --user --scope so launched apps have their own independent cgroups
+    // and do not inherit or pollute the dock's service cgroup or terminate if dock restarts.
+    bool ok = QProcess::startDetached("systemd-run", QStringList() << "--user" << "--scope" << "sh" << "-c" << QString("( %1 )").arg(command));
+    if (!ok) {
+        QProcess::startDetached("sh", QStringList() << "-c" << QString("( %1 ) >/dev/null 2>&1 &").arg(command));
+    }
 }
 
 void DockManager::quitDock() {

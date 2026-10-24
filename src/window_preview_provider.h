@@ -4,6 +4,7 @@
 #include <QImage>
 #include <QHash>
 #include <QStringList>
+#include <QSet>
 #include <QMutex>
 
 class WindowPreviewProvider : public QQuickImageProvider {
@@ -15,10 +16,12 @@ public:
 
     void storeCached(const QString &uuid, const QImage &img);
     QImage getCached(const QString &uuid) const;
+    void pruneTo(const QSet<QString> &validUuids);
+    void clear();
 
 private:
     mutable QMutex m_mutex;
     QHash<QString, QImage> m_cache;
     QStringList m_lruOrder;
-    static constexpr int MaxCacheEntries = 20;
+    static constexpr int MaxCacheEntries = 8;
 };

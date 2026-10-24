@@ -131,3 +131,20 @@ QImage WindowPreviewProvider::getCached(const QString &uuid) const {
     QMutexLocker locker(&m_mutex);
     return m_cache.value(uuid);
 }
+
+void WindowPreviewProvider::pruneTo(const QSet<QString> &validUuids) {
+    QMutexLocker locker(&m_mutex);
+    for (int i = m_lruOrder.size() - 1; i >= 0; --i) {
+        const QString &uuid = m_lruOrder.at(i);
+        if (!validUuids.contains(uuid)) {
+            m_cache.remove(uuid);
+            m_lruOrder.removeAt(i);
+        }
+    }
+}
+
+void WindowPreviewProvider::clear() {
+    QMutexLocker locker(&m_mutex);
+    m_cache.clear();
+    m_lruOrder.clear();
+}
