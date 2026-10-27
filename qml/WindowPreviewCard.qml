@@ -1,8 +1,7 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Effects
 
-// Frameless Live Window Preview with Apple-grade rounded corners & shadow
+// Frameless Live Window Preview with Apple-grade squircle corners & ambient shadow
 Item {
     id: root
 
@@ -31,7 +30,20 @@ Item {
         NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
     }
 
-    // ── Raw Window Screenshot ──
+    // ── Soft Ambient Drop Shadow ──
+    Rectangle {
+        anchors.fill: parent
+        anchors.topMargin: -1
+        anchors.bottomMargin: -6
+        anchors.leftMargin: -4
+        anchors.rightMargin: -4
+        radius: 18
+        color: Qt.rgba(0, 0, 0, 0.38)
+        z: -1
+        visible: previewImage.visible
+    }
+
+    // ── Pure Window Screenshot (Rounded squircle corners baked in via C++ QPainter) ──
     Image {
         id: previewImage
         anchors.fill: parent
@@ -41,57 +53,30 @@ Item {
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
-        visible: false // rendered through MultiEffect with rounded mask
-    }
-
-    // ── Rounded Corner Mask ──
-    Rectangle {
-        id: maskRect
-        width: root.width
-        height: root.height
-        radius: 16
-        visible: false
-    }
-
-    // ── Rounded Window Thumbnail with Ambient Drop Shadow ──
-    MultiEffect {
-        id: effect
-        source: previewImage
-        anchors.fill: parent
-        visible: previewImage.status === Image.Ready || previewImage.implicitWidth > 0
-
-        maskEnabled: true
-        maskSource: maskRect
-        maskThresholdMin: 0.5
-        maskSpreadAtMin: 1.0
-
-        shadowEnabled: true
-        shadowBlur: 0.8
-        shadowOpacity: 0.45
-        shadowVerticalOffset: 6
-        shadowScale: 1.0
+        visible: status === Image.Ready || implicitWidth > 0
     }
 
     // ── Hairline Border Highlight (Matches macOS squircle icons) ──
     Rectangle {
         anchors.fill: parent
-        radius: 16
+        radius: 14
         color: "transparent"
         border.width: 1
         border.color: dockManager.isDarkTheme
-            ? Qt.rgba(1, 1, 1, 0.20)
-            : Qt.rgba(0, 0, 0, 0.15)
-        visible: effect.visible
+            ? Qt.rgba(1, 1, 1, 0.22)
+            : Qt.rgba(0, 0, 0, 0.16)
+        visible: previewImage.visible
+        z: 1
     }
 
     // ── Minimal Loading Fallback ──
     Rectangle {
         anchors.fill: parent
-        radius: 16
+        radius: 14
         color: dockManager.isDarkTheme ? Qt.rgba(0.12, 0.12, 0.14, 0.9) : Qt.rgba(0.9, 0.9, 0.92, 0.9)
         border.width: 1
         border.color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.15) : Qt.rgba(0, 0, 0, 0.12)
-        visible: !effect.visible
+        visible: !previewImage.visible
 
         Image {
             anchors.centerIn: parent

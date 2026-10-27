@@ -5,6 +5,8 @@
 #include <QDBusUnixFileDescriptor>
 #include <QUrl>
 #include <QDebug>
+#include <QPainter>
+#include <QPainterPath>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -106,13 +108,27 @@ QImage WindowPreviewProvider::requestImage(const QString &id, QSize *size, const
         return getCached(cleanUuid);
     }
 
-    storeCached(cleanUuid, thumbnail);
+    // Apply smooth anti-aliased squircle rounded corners directly to thumbnail alpha channel
+    QImage rounded(thumbnail.size(), QImage::Format_ARGB32_Premultiplied);
+    rounded.fill(Qt::transparent);
+    {
+        QPainter p(&rounded);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        QPainterPath path;
+        // ~28px radius at 720px scale = ~14px on a 360px display
+        path.addRoundedRect(QRectF(0, 0, thumbnail.width(), thumbnail.height()), 28, 28);
+        p.setClipPath(path);
+        p.drawImage(0, 0, thumbnail);
+    }
+
+    storeCached(cleanUuid, rounded);
 
     if (size) {
-        *size = thumbnail.size();
+        *size = rounded.size();
     }
-    qInfo() << "[WindowPreview] Successfully captured window preview for" << cleanUuid << "size:" << thumbnail.size();
-    return thumbnail;
+    qInfo() << "[WindowPreview] Successfully captured window preview for" << cleanUuid << "size:" << rounded.size();
+    return rounded;
 }
 
 void WindowPreviewProvider::storeCached(const QString &uuid, const QImage &img) {
