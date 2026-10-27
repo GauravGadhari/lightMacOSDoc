@@ -250,18 +250,38 @@ Item {
     Timer {
         id: previewDebounce
         property bool showIt: false
-        interval: 200
+        interval: 160
         repeat: false
         onTriggered: showIt = true
     }
 
-    // Track hover state changes to control debounce
+    // ── Preview Dismiss Grace Timer ──
+    // Allows mouse to travel seamlessly from icon up into the preview card without dismissing
+    Timer {
+        id: previewDismissTimer
+        interval: 280
+        repeat: false
+        onTriggered: {
+            var popupHovered = windowPreviewLoader.item && windowPreviewLoader.item.isHovered;
+            if (!root.isHovered && !popupHovered) {
+                previewDebounce.showIt = false;
+            }
+        }
+    }
+
+    // Track hover state changes to control preview appearance
     onIsHoveredChanged: {
         if (isHovered && appData && appData.windowCount > 0 && !isDragging) {
+            previewDismissTimer.stop();
             previewDebounce.restart();
         } else {
             previewDebounce.stop();
-            previewDebounce.showIt = false;
+            if (previewDebounce.showIt) {
+                // Mouse left icon: give 280ms grace period to enter the preview card
+                previewDismissTimer.restart();
+            } else {
+                previewDebounce.showIt = false;
+            }
         }
     }
 
@@ -282,6 +302,24 @@ Item {
             appData: root.appData
             appIcon: root.appData ? root.appData.icon : ""
             showPreview: windowPreviewLoader.active
+            dockContainerRef: root.dockContainerRef
+            dockItemRef: root
+        }
+    }
+
+    // Keep preview & dock visible while hovering the preview card
+    Connections {
+        target: windowPreviewLoader.item
+        ignoreUnknownSignals: true
+        function onIsHoveredChanged() {
+            if (windowPreviewLoader.item && windowPreviewLoader.item.isHovered) {
+                previewDismissTimer.stop();
+                if (root.dockContainerRef) {
+                    root.dockContainerRef.isMouseInside = true;
+                }
+            } else if (windowPreviewLoader.item && !windowPreviewLoader.item.isHovered && !root.isHovered) {
+                previewDismissTimer.restart();
+            }
         }
     }
 

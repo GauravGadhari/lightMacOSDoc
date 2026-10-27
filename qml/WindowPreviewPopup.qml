@@ -8,12 +8,16 @@ Item {
     property var appData: null
     property bool showPreview: false
     property string appIcon: ""
+    property var dockContainerRef: null
+    property var dockItemRef: null
+
+    property bool isHovered: false
 
     readonly property int winCount: (appData && appData.windows) ? appData.windows.length : 0
 
     // Scale dynamically based on window count so multi-window apps fit gracefully
     readonly property real cardWidth: winCount > 2 ? 260 : (winCount === 2 ? 310 : 360)
-    readonly property real cardSpacing: 12
+    readonly property real cardSpacing: 14
 
     readonly property real totalWidth: winCount > 0
         ? (winCount * cardWidth + (winCount - 1) * cardSpacing)
@@ -23,18 +27,22 @@ Item {
     width: totalWidth
     height: totalHeight
 
-    // Smooth fade & scale appearance
+    // ── Signature macOS Fluid Spring Pop Animation ──
     opacity: showPreview ? 1.0 : 0.0
-    scale: showPreview ? 1.0 : 0.94
+    scale: showPreview ? 1.0 : 0.88
     visible: opacity > 0.01 && winCount > 0
 
     transformOrigin: Item.Bottom
 
     Behavior on opacity {
-        NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
+        NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
     }
     Behavior on scale {
-        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+        NumberAnimation {
+            duration: root.showPreview ? 220 : 120
+            easing.type: root.showPreview ? Easing.OutBack : Easing.InQuad
+            easing.overshoot: 1.15
+        }
     }
 
     // Clamp horizontal position so previews near screen edges never clip off-screen
@@ -48,12 +56,15 @@ Item {
         return parent.mapFromItem(null, clampedGlobalLeft, 0).x;
     }
 
-    // Anchored cleanly 10px above the top of the dock icon
+    // Anchored cleanly 14px above the top of the dock icon with smooth rise
     anchors.bottom: parent ? parent.bottom : undefined
-    anchors.bottomMargin: showPreview ? 10 : 4
+    anchors.bottomMargin: showPreview ? 14 : 2
 
     Behavior on anchors.bottomMargin {
-        NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
+        NumberAnimation {
+            duration: root.showPreview ? 200 : 120
+            easing.type: Easing.OutCubic
+        }
     }
 
     // ── Preview Cards Row ──
@@ -77,15 +88,40 @@ Item {
                 windowActive: modelData.active || false
                 appIcon: root.appIcon
                 width: root.cardWidth
+                popupRef: root
             }
         }
     }
 
-    // ── Keep dock visible while interacting with preview cards ──
+    // ── Keep dock & preview visible while interacting with preview cards ──
     MouseArea {
-        anchors.fill: cardsRow
+        anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
         propagateComposedEvents: true
+
+        onEntered: {
+            root.isHovered = true;
+            if (root.dockContainerRef) {
+                root.dockContainerRef.isMouseInside = true;
+            }
+        }
+
+        onPositionChanged: {
+            root.isHovered = true;
+            if (root.dockContainerRef) {
+                root.dockContainerRef.isMouseInside = true;
+            }
+        }
+
+        onExited: {
+            root.isHovered = false;
+        }
+    }
+
+    onIsHoveredChanged: {
+        if (isHovered && root.dockContainerRef) {
+            root.dockContainerRef.isMouseInside = true;
+        }
     }
 }

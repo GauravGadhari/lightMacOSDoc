@@ -1,7 +1,8 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 
-// Frameless Window Preview (no borders, no corner wrappers, true aspect ratio, zero idle re-renders)
+// Frameless Live Window Preview with Apple-grade rounded corners & shadow
 Item {
     id: root
 
@@ -10,6 +11,7 @@ Item {
     property bool windowMinimized: false
     property bool windowActive: false
     property string appIcon: ""
+    property var popupRef: null
 
     // Width provided by parent; height dynamically derived from window aspect ratio
     width: 360
@@ -24,12 +26,12 @@ Item {
     // Hover state for subtle interactive feel
     property bool isHovered: cardMouse.containsMouse
 
-    scale: isHovered ? 1.02 : 1.0
+    scale: isHovered ? 1.03 : 1.0
     Behavior on scale {
-        NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
+        NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
     }
 
-    // ── Pure Window Screenshot (captured cleanly upon hover, no timer re-polling) ──
+    // ── Raw Window Screenshot ──
     Image {
         id: previewImage
         anchors.fill: parent
@@ -39,13 +41,57 @@ Item {
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
-        visible: status === Image.Ready || implicitWidth > 0
+        visible: false // rendered through MultiEffect with rounded mask
     }
 
-    // ── Minimal Loading / Uncached Fallback ──
-    Item {
+    // ── Rounded Corner Mask ──
+    Rectangle {
+        id: maskRect
+        width: root.width
+        height: root.height
+        radius: 16
+        visible: false
+    }
+
+    // ── Rounded Window Thumbnail with Ambient Drop Shadow ──
+    MultiEffect {
+        id: effect
+        source: previewImage
         anchors.fill: parent
-        visible: !previewImage.visible
+        visible: previewImage.status === Image.Ready || previewImage.implicitWidth > 0
+
+        maskEnabled: true
+        maskSource: maskRect
+        maskThresholdMin: 0.5
+        maskSpreadAtMin: 1.0
+
+        shadowEnabled: true
+        shadowBlur: 0.8
+        shadowOpacity: 0.45
+        shadowVerticalOffset: 6
+        shadowScale: 1.0
+    }
+
+    // ── Hairline Border Highlight (Matches macOS squircle icons) ──
+    Rectangle {
+        anchors.fill: parent
+        radius: 16
+        color: "transparent"
+        border.width: 1
+        border.color: dockManager.isDarkTheme
+            ? Qt.rgba(1, 1, 1, 0.20)
+            : Qt.rgba(0, 0, 0, 0.15)
+        visible: effect.visible
+    }
+
+    // ── Minimal Loading Fallback ──
+    Rectangle {
+        anchors.fill: parent
+        radius: 16
+        color: dockManager.isDarkTheme ? Qt.rgba(0.12, 0.12, 0.14, 0.9) : Qt.rgba(0.9, 0.9, 0.92, 0.9)
+        border.width: 1
+        border.color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.15) : Qt.rgba(0, 0, 0, 0.12)
+        visible: !effect.visible
 
         Image {
             anchors.centerIn: parent
@@ -54,7 +100,7 @@ Item {
             source: root.appIcon
             fillMode: Image.PreserveAspectFit
             smooth: true
-            opacity: 0.45
+            opacity: 0.5
         }
     }
 
@@ -65,6 +111,18 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         z: 10
+
+        onEntered: {
+            if (root.popupRef) {
+                root.popupRef.isHovered = true;
+            }
+        }
+
+        onPositionChanged: {
+            if (root.popupRef) {
+                root.popupRef.isHovered = true;
+            }
+        }
 
         onClicked: {
             dockManager.activateWindow(root.windowId);
