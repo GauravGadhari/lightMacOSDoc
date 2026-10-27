@@ -99,8 +99,8 @@ QImage WindowPreviewProvider::requestImage(const QString &id, QSize *size, const
         static_cast<QImage::Format>(format)
     );
 
-    // Downscale to a crisp Retina thumbnail (~440x280) and free the large raw buffer immediately
-    QImage thumbnail = rawImg.scaled(QSize(440, 280), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // Downscale to a crisp Retina thumbnail (~720x450) and free the large raw buffer immediately
+    QImage thumbnail = rawImg.scaled(QSize(720, 450), Qt::KeepAspectRatio, Qt::SmoothTransformation);
 
     if (thumbnail.isNull()) {
         return getCached(cleanUuid);

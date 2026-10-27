@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-// Minimalist Frosted Glass Container Popup for Window Preview Cards
+// Floating Frameless Container for Live Window Previews
 Item {
     id: root
 
@@ -11,119 +11,56 @@ Item {
 
     readonly property int winCount: (appData && appData.windows) ? appData.windows.length : 0
 
-    // Card dimensions
-    readonly property real cardWidth: 196
-    readonly property real cardHeight: 132
-    readonly property real cardSpacing: 8
-    readonly property real popupPadding: 8
-    readonly property real caretSize: 5
+    // Scale dynamically based on window count so multi-window apps fit gracefully
+    readonly property real cardWidth: winCount > 2 ? 260 : (winCount === 2 ? 310 : 360)
+    readonly property real cardSpacing: 12
 
-    // Total popup dimensions
-    readonly property real popupContentWidth: winCount > 0
+    readonly property real totalWidth: winCount > 0
         ? (winCount * cardWidth + (winCount - 1) * cardSpacing)
         : 0
-    readonly property real totalWidth: popupContentWidth + popupPadding * 2
-    readonly property real totalHeight: cardHeight + popupPadding * 2 + caretSize
+    readonly property real totalHeight: cardsRow.height
 
     width: totalWidth
     height: totalHeight
-    anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
 
-    // Position cleanly above the icon
-    y: showPreview ? (-totalHeight - 6) : (-totalHeight + 4)
+    // Smooth fade & scale appearance
     opacity: showPreview ? 1.0 : 0.0
-    scale: showPreview ? 1.0 : 0.92
+    scale: showPreview ? 1.0 : 0.94
     visible: opacity > 0.01 && winCount > 0
 
     transformOrigin: Item.Bottom
 
     Behavior on opacity {
-        NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
+        NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
     }
     Behavior on scale {
-        NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
-    }
-    Behavior on y {
-        NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
+        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
     }
 
-    // ── Minimal Frosted Glass Surface ──
-    Rectangle {
-        id: bgPill
-        anchors.top: parent.top
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: root.totalWidth
-        height: root.cardHeight + root.popupPadding * 2
-        radius: 13
-
-        color: dockManager.isDarkTheme
-            ? Qt.rgba(0.11, 0.11, 0.13, 0.94)
-            : Qt.rgba(0.95, 0.95, 0.97, 0.95)
-        border.color: dockManager.isDarkTheme
-            ? Qt.rgba(1, 1, 1, 0.14)
-            : Qt.rgba(0, 0, 0, 0.10)
-        border.width: 0.8
-
-        // Hairline top highlight
-        Rectangle {
-            anchors.top: parent.top
-            anchors.topMargin: 1
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: parent.width - 22
-            height: 1
-            radius: 0.5
-            color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(1, 1, 1, 0.5)
-        }
+    // Clamp horizontal position so previews near screen edges never clip off-screen
+    x: {
+        if (!parent) return 0;
+        var iconGlobalCenterX = parent.mapToItem(null, parent.width / 2, 0).x;
+        var idealGlobalLeft = iconGlobalCenterX - width / 2;
+        var minGlobalLeft = 12;
+        var maxGlobalLeft = (typeof realScreenWidth !== "undefined" ? realScreenWidth : 1920) - width - 12;
+        var clampedGlobalLeft = Math.max(minGlobalLeft, Math.min(maxGlobalLeft, idealGlobalLeft));
+        return parent.mapFromItem(null, clampedGlobalLeft, 0).x;
     }
 
-    // ── Subtle Downward Caret ──
-    Canvas {
-        id: caret
-        anchors.top: bgPill.bottom
-        anchors.topMargin: -1
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: 12
-        height: root.caretSize
+    // Anchored cleanly 10px above the top of the dock icon
+    anchors.bottom: parent ? parent.bottom : undefined
+    anchors.bottomMargin: showPreview ? 10 : 4
 
-        onPaint: {
-            var ctx = getContext("2d");
-            ctx.reset();
-            ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.lineTo(width / 2, height);
-            ctx.lineTo(width, 0);
-            ctx.closePath();
-
-            ctx.fillStyle = dockManager.isDarkTheme
-                ? Qt.rgba(0.11, 0.11, 0.13, 0.94)
-                : Qt.rgba(0.95, 0.95, 0.97, 0.95);
-            ctx.fill();
-
-            ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.lineTo(width / 2, height);
-            ctx.lineTo(width, 0);
-            ctx.strokeStyle = dockManager.isDarkTheme
-                ? Qt.rgba(1, 1, 1, 0.14)
-                : Qt.rgba(0, 0, 0, 0.10);
-            ctx.lineWidth = 0.8;
-            ctx.stroke();
-        }
-
-        Connections {
-            target: dockManager
-            function onIsDarkThemeChanged() {
-                caret.requestPaint();
-            }
-        }
+    Behavior on anchors.bottomMargin {
+        NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
     }
 
     // ── Preview Cards Row ──
     Row {
         id: cardsRow
-        anchors.top: bgPill.top
-        anchors.topMargin: root.popupPadding
-        anchors.horizontalCenter: bgPill.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.horizontalCenter: parent.horizontalCenter
         spacing: root.cardSpacing
 
         Repeater {
@@ -140,14 +77,13 @@ Item {
                 windowActive: modelData.active || false
                 appIcon: root.appIcon
                 width: root.cardWidth
-                height: root.cardHeight
             }
         }
     }
 
     // ── Keep dock visible while interacting with preview cards ──
     MouseArea {
-        anchors.fill: bgPill
+        anchors.fill: cardsRow
         hoverEnabled: true
         acceptedButtons: Qt.NoButton
         propagateComposedEvents: true

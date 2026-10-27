@@ -268,7 +268,7 @@ Item {
     // ── Window Preview Popup (lazy loaded only when hovered) ──
     Loader {
         id: windowPreviewLoader
-        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.top
         active: previewDebounce.showIt
                 && !contextMenu.visible
                 && !dockManager.isMenuOpen

@@ -242,7 +242,7 @@ Item {
 
     // Extra padding on sides so magnified edge icons aren't clipped
     width: dockPill.width + 200
-    height: 290
+    height: 380
 
     // ────────────────────────────────────────────────────────────────
     // LAYER 1: Full-Width Magnification Tracker (entire height)
@@ -280,9 +280,9 @@ Item {
         anchors.bottom: parent.bottom
         anchors.left: dockPill.left
         anchors.right: dockPill.right
-        anchors.leftMargin: -20
-        anchors.rightMargin: -20
-        height: 245
+        anchors.leftMargin: -80
+        anchors.rightMargin: -80
+        height: parent.height
         hoverEnabled: true
         acceptedButtons: Qt.RightButton
         propagateComposedEvents: true

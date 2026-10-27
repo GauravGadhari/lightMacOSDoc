@@ -28,9 +28,9 @@ Window {
     // Window is ALWAYS 220px × fullWidth. We MOVE it up/down instead.
     // Moving = no GPU buffer realloc = no black square flicker.
     width: realScreenWidth
-    height: 290
+    height: 380
     x: 0
-    y: realScreenHeight - 290  // starts fully visible
+    y: realScreenHeight - 380  // starts fully visible
 
     // ── Auto-Hide State ──
     property bool dockVisible: true
@@ -149,7 +149,7 @@ Window {
             dockContainer.opacity = 0;
 
             // MOVE window to full-visible position (no resize!)
-            root.y = realScreenHeight - 290;
+            root.y = realScreenHeight - 380;
 
             // Wait for compositor to settle, then show + animate
             revealSettleTimer.restart();

@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-// Minimalist Apple-grade Window Preview Card with real KWin window thumbnail
+// Frameless Live Window Preview (no borders, no corner wrappers, true aspect ratio)
 Item {
     id: root
 
@@ -12,172 +12,75 @@ Item {
     property string appIcon: ""
     property int refreshTick: 0
 
-    width: 196
-    height: 132
-
-    // Hover state
-    property bool isHovered: cardMouse.containsMouse || closeBtnMouse.containsMouse
-
-    // Subtle hover background pill
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: -3
-        radius: 10
-        color: {
-            if (!root.isHovered) return "transparent";
-            return dockManager.isDarkTheme
-                ? Qt.rgba(1, 1, 1, 0.06)
-                : Qt.rgba(0, 0, 0, 0.05);
+    // Width provided by parent; height dynamically derived from window aspect ratio
+    width: 360
+    height: {
+        if (previewImage.implicitWidth > 0 && previewImage.implicitHeight > 0) {
+            var calcH = width * (previewImage.implicitHeight / previewImage.implicitWidth);
+            return Math.min(240, Math.max(140, calcH));
         }
-        Behavior on color { ColorAnimation { duration: 120 } }
+        return width * (10.0 / 16.0); // 225
     }
 
-    Column {
-        anchors.fill: parent
-        spacing: 5
+    // Hover state for subtle interactive feel
+    property bool isHovered: cardMouse.containsMouse
 
-        // ── 1. Minimal Header: Clean Title + Hover-only Close Button ──
-        Item {
-            width: parent.width
-            height: 20
+    scale: isHovered ? 1.02 : 1.0
+    Behavior on scale {
+        NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
+    }
 
-            Text {
-                anchors.left: parent.left
-                anchors.leftMargin: 4
-                anchors.right: closeBtn.visible ? closeBtn.left : parent.right
-                anchors.rightMargin: 4
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.windowTitle || "Window"
-                font.pixelSize: 11
-                font.weight: root.windowActive ? Font.Medium : Font.Normal
-                font.family: "SF Pro Text, Inter, Cantarell, Ubuntu, sans-serif"
-                color: dockManager.isDarkTheme ? "#EBEBF5" : "#1C1C1E"
-                opacity: (root.isHovered || root.windowActive) ? 0.95 : 0.65
-                elide: Text.ElideRight
-                maximumLineCount: 1
-
-                Behavior on opacity { NumberAnimation { duration: 120 } }
-            }
-
-            Rectangle {
-                id: closeBtn
-                anchors.right: parent.right
-                anchors.rightMargin: 2
-                anchors.verticalCenter: parent.verticalCenter
-                width: 16
-                height: 16
-                radius: 8
-                color: closeBtnMouse.containsMouse
-                    ? "#FF453A"
-                    : (dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(0, 0, 0, 0.09))
-                opacity: root.isHovered ? 1.0 : 0.0
-                visible: opacity > 0.01
-
-                Behavior on opacity { NumberAnimation { duration: 120 } }
-                Behavior on color { ColorAnimation { duration: 80 } }
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "✕"
-                    font.pixelSize: 8
-                    font.weight: Font.Bold
-                    color: closeBtnMouse.containsMouse
-                        ? "#FFFFFF"
-                        : (dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.75) : Qt.rgba(0, 0, 0, 0.6))
-                }
-
-                MouseArea {
-                    id: closeBtnMouse
-                    anchors.fill: parent
-                    anchors.margins: -4
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        dockManager.closeWindowById(root.windowId);
-                    }
-                }
-            }
-        }
-
-        // ── 2. Clean Edge-to-Edge Thumbnail Viewport ──
-        Rectangle {
-            id: thumbContainer
-            width: parent.width
-            height: parent.height - 25
-            radius: 8
-            color: dockManager.isDarkTheme
-                ? Qt.rgba(0.06, 0.06, 0.08, 0.9)
-                : Qt.rgba(0.90, 0.90, 0.93, 0.9)
-            border.color: {
-                if (root.isHovered) {
-                    return dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.30) : Qt.rgba(0, 0, 0, 0.22);
-                }
-                if (root.windowActive) {
-                    return dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.18) : Qt.rgba(0, 0, 0, 0.14);
-                }
-                return dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.07) : Qt.rgba(0, 0, 0, 0.06);
-            }
-            border.width: 0.8
-            clip: true
-
-            Behavior on border.color { ColorAnimation { duration: 120 } }
-
-            // Real KWin Window Screenshot Thumbnail
-            Image {
-                id: previewImage
-                anchors.fill: parent
-                anchors.margins: 2
-                source: root.windowId !== "" ? ("image://windowpreview/" + root.windowId) : ""
-                asynchronous: true
-                cache: false
-                sourceSize: Qt.size(240, 150)
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-                mipmap: true
-                visible: status === Image.Ready && implicitWidth > 0
-            }
-
-            // Minimal Fallback (shown only while loading or for uncached minimized windows)
-            Item {
-                anchors.fill: parent
-                visible: !previewImage.visible
-
-                Image {
-                    anchors.centerIn: parent
-                    anchors.verticalCenterOffset: root.windowMinimized ? -5 : 0
-                    width: 32
-                    height: 32
-                    source: root.appIcon
-                    fillMode: Image.PreserveAspectFit
-                    smooth: true
-                    mipmap: true
-                    opacity: 0.45
-                }
-
-                Text {
-                    visible: root.windowMinimized
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 6
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "Minimized"
-                    font.pixelSize: 9
-                    font.weight: Font.Normal
-                    color: dockManager.isDarkTheme ? Qt.rgba(1, 1, 1, 0.38) : Qt.rgba(0, 0, 0, 0.38)
-                }
-            }
+    // ── Live Refresh Timer (refreshes screenshot every 1s while preview is visible) ──
+    Timer {
+        id: liveRefreshTimer
+        interval: 1000
+        running: root.visible && root.windowId !== ""
+        repeat: true
+        onTriggered: {
+            root.refreshTick++;
         }
     }
 
-    // ── Click to Activate Window ──
+    // ── Pure Live Window Screenshot (No borders, no container framing) ──
+    Image {
+        id: previewImage
+        anchors.fill: parent
+        source: root.windowId !== "" ? ("image://windowpreview/" + root.windowId + "?t=" + root.refreshTick) : ""
+        asynchronous: true
+        cache: false
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        mipmap: true
+        visible: status === Image.Ready || implicitWidth > 0
+    }
+
+    // ── Minimal Loading / Uncached Fallback ──
+    Item {
+        anchors.fill: parent
+        visible: !previewImage.visible
+
+        Image {
+            anchors.centerIn: parent
+            width: 48
+            height: 48
+            source: root.appIcon
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            opacity: 0.45
+        }
+    }
+
+    // ── Click to Focus & Activate Window ──
     MouseArea {
         id: cardMouse
         anchors.fill: parent
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
-        z: -1
+        z: 10
 
         onClicked: {
             dockManager.activateWindow(root.windowId);
+            dockManager.dismissAllMenus();
         }
     }
 }
