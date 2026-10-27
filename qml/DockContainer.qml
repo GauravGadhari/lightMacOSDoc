@@ -240,8 +240,16 @@ Item {
         onTriggered: root.isReady = true
     }
 
-    // Extra padding on sides so magnified edge icons aren't clipped
-    width: dockPill.width + 200
+    // Whether any window preview popup is currently hovered by cursor
+    property bool isPreviewHovered: false
+    onIsPreviewHoveredChanged: {
+        if (isPreviewHovered) {
+            root.isMouseInside = true;
+        }
+    }
+
+    // Full screen width so wide previews never leave container bounds
+    width: parent ? parent.width : (dockPill.width + 800)
     height: 380
 
     // ────────────────────────────────────────────────────────────────
@@ -265,7 +273,9 @@ Item {
 
         onExited: {
             root.dockMouseX = null;
-            root.isMouseInside = false;
+            if (!root.isPreviewHovered) {
+                root.isMouseInside = false;
+            }
         }
     }
 
@@ -280,8 +290,8 @@ Item {
         anchors.bottom: parent.bottom
         anchors.left: dockPill.left
         anchors.right: dockPill.right
-        anchors.leftMargin: -80
-        anchors.rightMargin: -80
+        anchors.leftMargin: -380
+        anchors.rightMargin: -380
         height: parent.height
         hoverEnabled: true
         acceptedButtons: Qt.RightButton
@@ -293,7 +303,9 @@ Item {
         }
 
         onExited: {
-            root.isMouseInside = false;
+            if (!root.isPreviewHovered) {
+                root.isMouseInside = false;
+            }
         }
 
         onPositionChanged: (mouse) => {

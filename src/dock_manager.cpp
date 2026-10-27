@@ -158,8 +158,8 @@ void DockManager::updateMask(int x, int y, int width, int height) {
     int winH = m_window->height();
     int winW = m_window->width();
 
-    int maskX = qMax(0, x - 220);
-    int maskW = qMin(winW - maskX, width + 440);
+    int maskX = qMax(0, x - 380);
+    int maskW = qMin(winW - maskX, width + 760);
     int maskY = 0;
     int maskH = winH;
 

@@ -108,7 +108,7 @@ QImage WindowPreviewProvider::requestImage(const QString &id, QSize *size, const
         return getCached(cleanUuid);
     }
 
-    // Apply smooth anti-aliased squircle rounded corners directly to thumbnail alpha channel
+    // Apply smooth Apple-grade rounded corners (24px at 720px width -> ~12px at 360px display scale)
     QImage rounded(thumbnail.size(), QImage::Format_ARGB32_Premultiplied);
     rounded.fill(Qt::transparent);
     {
@@ -116,8 +116,7 @@ QImage WindowPreviewProvider::requestImage(const QString &id, QSize *size, const
         p.setRenderHint(QPainter::Antialiasing, true);
         p.setRenderHint(QPainter::SmoothPixmapTransform, true);
         QPainterPath path;
-        // ~28px radius at 720px scale = ~14px on a 360px display
-        path.addRoundedRect(QRectF(0, 0, thumbnail.width(), thumbnail.height()), 28, 28);
+        path.addRoundedRect(QRectF(0, 0, thumbnail.width(), thumbnail.height()), 24, 24);
         p.setClipPath(path);
         p.drawImage(0, 0, thumbnail);
     }

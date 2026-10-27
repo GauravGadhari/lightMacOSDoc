@@ -250,37 +250,49 @@ Item {
     Timer {
         id: previewDebounce
         property bool showIt: false
-        interval: 160
+        interval: 200
         repeat: false
         onTriggered: showIt = true
     }
 
-    // ── Preview Dismiss Grace Timer ──
-    // Allows mouse to travel seamlessly from icon up into the preview card without dismissing
+    // ── Preview Popup Hover Synchronization ──
+    property bool isPopupHovered: (windowPreviewLoader.item && windowPreviewLoader.item.isHovered) ? true : false
+
+    onIsPopupHoveredChanged: {
+        if (dockContainerRef) {
+            dockContainerRef.isPreviewHovered = isPopupHovered;
+        }
+        updatePreviewState();
+    }
+
+    onIsHoveredChanged: {
+        updatePreviewState();
+    }
+
     Timer {
-        id: previewDismissTimer
-        interval: 280
+        id: closeDebounceTimer
+        interval: 350 // 350ms grace window to move cursor from icon to preview cards
         repeat: false
         onTriggered: {
-            var popupHovered = windowPreviewLoader.item && windowPreviewLoader.item.isHovered;
-            if (!root.isHovered && !popupHovered) {
+            if (!root.isHovered && !root.isPopupHovered) {
                 previewDebounce.showIt = false;
+                if (dockContainerRef) {
+                    dockContainerRef.isPreviewHovered = false;
+                }
             }
         }
     }
 
-    // Track hover state changes to control preview appearance
-    onIsHoveredChanged: {
-        if (isHovered && appData && appData.windowCount > 0 && !isDragging) {
-            previewDismissTimer.stop();
-            previewDebounce.restart();
+    function updatePreviewState() {
+        if ((isHovered || isPopupHovered) && appData && appData.windowCount > 0 && !isDragging) {
+            closeDebounceTimer.stop();
+            if (!previewDebounce.showIt && !previewDebounce.running) {
+                previewDebounce.restart();
+            }
         } else {
             previewDebounce.stop();
             if (previewDebounce.showIt) {
-                // Mouse left icon: give 280ms grace period to enter the preview card
-                previewDismissTimer.restart();
-            } else {
-                previewDebounce.showIt = false;
+                closeDebounceTimer.restart();
             }
         }
     }
@@ -302,24 +314,6 @@ Item {
             appData: root.appData
             appIcon: root.appData ? root.appData.icon : ""
             showPreview: windowPreviewLoader.active
-            dockContainerRef: root.dockContainerRef
-            dockItemRef: root
-        }
-    }
-
-    // Keep preview & dock visible while hovering the preview card
-    Connections {
-        target: windowPreviewLoader.item
-        ignoreUnknownSignals: true
-        function onIsHoveredChanged() {
-            if (windowPreviewLoader.item && windowPreviewLoader.item.isHovered) {
-                previewDismissTimer.stop();
-                if (root.dockContainerRef) {
-                    root.dockContainerRef.isMouseInside = true;
-                }
-            } else if (windowPreviewLoader.item && !windowPreviewLoader.item.isHovered && !root.isHovered) {
-                previewDismissTimer.restart();
-            }
         }
     }
 

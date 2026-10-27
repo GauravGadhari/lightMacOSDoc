@@ -8,16 +8,15 @@ Item {
     property var appData: null
     property bool showPreview: false
     property string appIcon: ""
-    property var dockContainerRef: null
-    property var dockItemRef: null
 
-    property bool isHovered: false
+    // Hover state to inform DockItem and DockContainer to stay visible
+    property bool isHovered: popupHoverArea.containsMouse
 
     readonly property int winCount: (appData && appData.windows) ? appData.windows.length : 0
 
     // Scale dynamically based on window count so multi-window apps fit gracefully
     readonly property real cardWidth: winCount > 2 ? 260 : (winCount === 2 ? 310 : 360)
-    readonly property real cardSpacing: 14
+    readonly property real cardSpacing: 12
 
     readonly property real totalWidth: winCount > 0
         ? (winCount * cardWidth + (winCount - 1) * cardSpacing)
@@ -27,22 +26,24 @@ Item {
     width: totalWidth
     height: totalHeight
 
-    // ── Signature macOS Fluid Spring Pop Animation ──
-    opacity: showPreview ? 1.0 : 0.0
-    scale: showPreview ? 1.0 : 0.88
-    visible: opacity > 0.01 && winCount > 0
+    // ── Apple-Grade Spring Appear / Dissolve Animation ──
+    property real animProgress: showPreview ? 1.0 : 0.0
+
+    Behavior on animProgress {
+        NumberAnimation {
+            duration: root.showPreview ? 240 : 130
+            easing.type: root.showPreview ? Easing.OutBack : Easing.OutQuad
+            easing.overshoot: 1.25
+        }
+    }
+
+    opacity: Math.max(0.0, Math.min(1.0, showPreview ? (animProgress * 1.5) : animProgress))
+    scale: 0.88 + 0.12 * animProgress
+    visible: opacity > 0.005 && winCount > 0
 
     transformOrigin: Item.Bottom
-
-    Behavior on opacity {
-        NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
-    }
-    Behavior on scale {
-        NumberAnimation {
-            duration: root.showPreview ? 220 : 120
-            easing.type: root.showPreview ? Easing.OutBack : Easing.InQuad
-            easing.overshoot: 1.15
-        }
+    transform: Translate {
+        y: (1.0 - animProgress) * 16
     }
 
     // Clamp horizontal position so previews near screen edges never clip off-screen
@@ -56,15 +57,23 @@ Item {
         return parent.mapFromItem(null, clampedGlobalLeft, 0).x;
     }
 
-    // Anchored cleanly 14px above the top of the dock icon with smooth rise
+    // Anchored cleanly 10px above the top of the dock icon
     anchors.bottom: parent ? parent.bottom : undefined
-    anchors.bottomMargin: showPreview ? 14 : 2
+    anchors.bottomMargin: 10
 
-    Behavior on anchors.bottomMargin {
-        NumberAnimation {
-            duration: root.showPreview ? 200 : 120
-            easing.type: Easing.OutCubic
-        }
+    // ── Seamless Bridge Hover Area ──
+    // Extends 24px downward to cover the gap to the icon so the mouse transition is gapless
+    MouseArea {
+        id: popupHoverArea
+        anchors.fill: parent
+        anchors.bottomMargin: -24
+        anchors.topMargin: -12
+        anchors.leftMargin: -12
+        anchors.rightMargin: -12
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+        propagateComposedEvents: true
+        z: -1
     }
 
     // ── Preview Cards Row ──
@@ -88,40 +97,7 @@ Item {
                 windowActive: modelData.active || false
                 appIcon: root.appIcon
                 width: root.cardWidth
-                popupRef: root
             }
-        }
-    }
-
-    // ── Keep dock & preview visible while interacting with preview cards ──
-    MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
-        acceptedButtons: Qt.NoButton
-        propagateComposedEvents: true
-
-        onEntered: {
-            root.isHovered = true;
-            if (root.dockContainerRef) {
-                root.dockContainerRef.isMouseInside = true;
-            }
-        }
-
-        onPositionChanged: {
-            root.isHovered = true;
-            if (root.dockContainerRef) {
-                root.dockContainerRef.isMouseInside = true;
-            }
-        }
-
-        onExited: {
-            root.isHovered = false;
-        }
-    }
-
-    onIsHoveredChanged: {
-        if (isHovered && root.dockContainerRef) {
-            root.dockContainerRef.isMouseInside = true;
         }
     }
 }
