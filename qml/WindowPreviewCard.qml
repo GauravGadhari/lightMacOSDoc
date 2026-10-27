@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
-// Frameless Live Window Preview (no borders, no corner wrappers, true aspect ratio)
+// Frameless Window Preview (no borders, no corner wrappers, true aspect ratio, zero idle re-renders)
 Item {
     id: root
 
@@ -10,7 +10,6 @@ Item {
     property bool windowMinimized: false
     property bool windowActive: false
     property string appIcon: ""
-    property int refreshTick: 0
 
     // Width provided by parent; height dynamically derived from window aspect ratio
     width: 360
@@ -30,22 +29,11 @@ Item {
         NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
     }
 
-    // ── Live Refresh Timer (refreshes screenshot every 1s while preview is visible) ──
-    Timer {
-        id: liveRefreshTimer
-        interval: 1000
-        running: root.visible && root.windowId !== ""
-        repeat: true
-        onTriggered: {
-            root.refreshTick++;
-        }
-    }
-
-    // ── Pure Live Window Screenshot (No borders, no container framing) ──
+    // ── Pure Window Screenshot (captured cleanly upon hover, no timer re-polling) ──
     Image {
         id: previewImage
         anchors.fill: parent
-        source: root.windowId !== "" ? ("image://windowpreview/" + root.windowId + "?t=" + root.refreshTick) : ""
+        source: root.windowId !== "" ? ("image://windowpreview/" + root.windowId) : ""
         asynchronous: true
         cache: false
         fillMode: Image.PreserveAspectFit
