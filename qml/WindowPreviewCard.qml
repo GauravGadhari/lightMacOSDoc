@@ -1,7 +1,8 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 
-// Frameless Window Preview with smooth rounded corners, floating shadow, and interactive hover
+// Frameless Window Preview with sharp corners (no corner radius) and a smooth drop shadow
 Item {
     id: root
 
@@ -29,17 +30,33 @@ Item {
         NumberAnimation { duration: 150; easing.type: Easing.OutBack; easing.overshoot: 1.15 }
     }
 
-    // ── Subtle Floating Shadow Behind the Rounded Preview ──
-    Rectangle {
-        anchors.fill: parent
-        radius: 12
-        color: Qt.rgba(0, 0, 0, 0.35)
-        anchors.verticalCenterOffset: 4
+    // ── Drop Shadow for Sharp Window ──
+    Item {
+        id: shadowContainer
+        anchors.fill: previewImage
         z: -1
         visible: previewImage.visible
+
+        Rectangle {
+            id: shadowSource
+            anchors.fill: parent
+            color: "#000000"
+            visible: false
+        }
+
+        MultiEffect {
+            anchors.fill: shadowSource
+            source: shadowSource
+            shadowEnabled: true
+            autoPaddingEnabled: true
+            shadowColor: Qt.rgba(0, 0, 0, 0.55)
+            shadowBlur: 0.65
+            shadowVerticalOffset: 6
+            shadowHorizontalOffset: 0
+        }
     }
 
-    // ── Pure Window Screenshot (captured cleanly upon hover with anti-aliased rounded corners) ──
+    // ── Pure Window Screenshot (sharp corners, no corner radius) ──
     Image {
         id: previewImage
         anchors.fill: parent

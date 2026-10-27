@@ -108,26 +108,13 @@ QImage WindowPreviewProvider::requestImage(const QString &id, QSize *size, const
         return getCached(cleanUuid);
     }
 
-    // Apply smooth Apple-grade rounded corners (24px at 720px width -> ~12px at 360px display scale)
-    QImage rounded(thumbnail.size(), QImage::Format_ARGB32_Premultiplied);
-    rounded.fill(Qt::transparent);
-    {
-        QPainter p(&rounded);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        QPainterPath path;
-        path.addRoundedRect(QRectF(0, 0, thumbnail.width(), thumbnail.height()), 24, 24);
-        p.setClipPath(path);
-        p.drawImage(0, 0, thumbnail);
-    }
-
-    storeCached(cleanUuid, rounded);
+    storeCached(cleanUuid, thumbnail);
 
     if (size) {
-        *size = rounded.size();
+        *size = thumbnail.size();
     }
-    qInfo() << "[WindowPreview] Successfully captured window preview for" << cleanUuid << "size:" << rounded.size();
-    return rounded;
+    qInfo() << "[WindowPreview] Successfully captured window preview for" << cleanUuid << "size:" << thumbnail.size();
+    return thumbnail;
 }
 
 void WindowPreviewProvider::storeCached(const QString &uuid, const QImage &img) {
