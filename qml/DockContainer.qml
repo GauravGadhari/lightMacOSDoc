@@ -90,58 +90,53 @@ Item {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Proper Verlet-integrated spring ODE with velocity state
-    //
-    // Each icon stores { lastWidth, currentWidth, velocity }.
-    // The solver uses semi-implicit Euler for stability:
-    //   acceleration = stiffness * (target - pos) - damping * velocity
-    //   velocity    += acceleration * dt
-    //   position    += velocity * dt
-    //
-    // Two tuning presets:
-    //   ENGAGE  — when cursor enters and icons swell toward the mouse
-    //             (stiffer, slightly underdamped → snappy with a micro-overshoot)
-    //   RELEASE — when cursor leaves and icons relax back to baseWidth
-    //             (softer, critically damped → gentle deceleration, no bounce)
+    // Svelte 5 tick_spring ODE solver (spring.js)
     // ────────────────────────────────────────────────────────────────
-
-    // Engage preset: responsive, slight overshoot for "alive" feel
-    readonly property real springStiffnessEngage:  320.0   // N/m  — fast attack
-    readonly property real springDampingEngage:     28.0    // Ns/m — slight underdamping (ζ ≈ 0.78)
-
-    // Release preset: gentle ease-out, no overshoot
-    readonly property real springStiffnessRelease: 180.0   // N/m  — softer
-    readonly property real springDampingRelease:    26.0    // Ns/m — critically damped (ζ ≈ 0.97)
-
-    // Settle threshold (sub-pixel)
-    readonly property real springPrecision: 0.08
-    readonly property real velocityPrecision: 0.5
-
-    function tickSpringAdvanced(dtSec, curVal, velocity, targetVal, stiffness, damping) {
-        // Semi-implicit Euler (unconditionally stable for these parameters)
-        var displacement = targetVal - curVal;
-        var accel = stiffness * displacement - damping * velocity;
-        var newVel = velocity + accel * dtSec;
-        var newPos = curVal + newVel * dtSec;
-        return { pos: newPos, vel: newVel };
+    function tickSpring(dt, last_val, cur_val, target_val, stiffness, damping, precision) {
+        var delta = target_val - cur_val;
+        var velocity = (cur_val - last_val) / dt;
+        var d = (velocity + (stiffness * delta - damping * velocity)) * dt;
+        if (Math.abs(d) < precision && Math.abs(delta) < precision) {
+            return target_val;
+        }
+        return cur_val + d;
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Smooth Gaussian-bell magnification curve (replaces piecewise linear)
+    // Popmotion interpolate() magnification curve from macos-web
     //
-    // scale(d) = 1 + (maxMag - 1) * exp(-0.5 * (d / sigma)^2)
+    // distanceInput:  [-limit, -limit/1.25, -limit/2, 0, limit/2, limit/1.25, limit]
+    // widthOutput:    [base,   base*1.1,    base*1.414, base*2, base*1.414, base*1.1, base]
     //
-    // This yields a perfectly smooth, C∞-continuous bell shape that
-    // the spring solver can track without the kinks of linear segments.
-    // sigma controls the width of the magnification zone.
+    // We use absolute distance so only the right half matters:
+    //   [0            → base*2.0  ]
+    //   [limit/2      → base*1.414]
+    //   [limit/1.25   → base*1.1  ]
+    //   [limit        → base*1.0  ]
     // ────────────────────────────────────────────────────────────────
-    readonly property real magnSigma: distanceLimit * 0.42  // ≈ 145px — tune the bell width
-
     function calcTargetWidth(absDist) {
-        if (absDist >= distanceLimit) return baseWidth;
-        var ratio = absDist / magnSigma;
-        var bell = Math.exp(-0.5 * ratio * ratio);
-        return baseWidth * (1.0 + (maxMagnification - 1.0) * bell);
+        var L = root.distanceLimit;
+        if (absDist >= L) return root.baseWidth;
+
+        var b = root.baseWidth;
+        // Keypoints (distance → scale factor)
+        var k0 = 0;              var s0 = 2.0;
+        var k1 = L / 2;          var s1 = 1.414;
+        var k2 = L / 1.25;       var s2 = 1.1;
+        var k3 = L;              var s3 = 1.0;
+
+        var scale;
+        if (absDist <= k1) {
+            var t = absDist / k1;
+            scale = s0 + t * (s1 - s0);    // 2.0 → 1.414
+        } else if (absDist <= k2) {
+            var t = (absDist - k1) / (k2 - k1);
+            scale = s1 + t * (s2 - s1);    // 1.414 → 1.1
+        } else {
+            var t = (absDist - k2) / (k3 - k2);
+            scale = s2 + t * (s3 - s2);    // 1.1 → 1.0
+        }
+        return b * scale;
     }
 
     // ────────────────────────────────────────────────────────────────
@@ -152,21 +147,15 @@ Item {
         running: true
 
         onTriggered: {
-            // Clamp dt to prevent spiral-of-death after long pauses
             var dtSec = (frameTime > 0.001 && frameTime < 0.05) ? frameTime : 0.016;
-            dtSec = Math.min(dtSec, 0.033);  // cap at ~30fps equivalent
+            var delta_time = Math.min(dtSec * 1000.0, 42.0) * 0.06;
+            if (delta_time <= 0.01) delta_time = 1.0;
 
             var count = itemsRepeater.count;
             if (count === 0) return;
 
             var needsLayout = false;
-            var allSettled = true;
             var draggedInstance = null;
-            var mouseEngaged = (root.dockMouseX !== null);
-
-            // Pick spring preset based on mouse state
-            var stiffness = mouseEngaged ? root.springStiffnessEngage : root.springStiffnessRelease;
-            var damping   = mouseEngaged ? root.springDampingEngage   : root.springDampingRelease;
 
             for (var i = 0; i < count; ++i) {
                 var delegate = itemsRepeater.itemAt(i);
@@ -178,9 +167,9 @@ Item {
                     draggedInstance = dockItem;
                 }
 
-                // ── Compute target width from cursor distance ──
+                // ── LIVE distance, using visual center so swaps have zero magnification jump ──
                 var targetW = root.baseWidth;
-                if (mouseEngaged && (!dockItem.appData || !dockItem.appData.isRemoving)) {
+                if (root.dockMouseX !== null && (!dockItem.appData || !dockItem.appData.isRemoving)) {
                     if (dockItem.isDragging) {
                         targetW = root.calcTargetWidth(0);
                     } else {
@@ -191,45 +180,25 @@ Item {
                     }
                 }
 
-                // ── Integrate spring ──
-                // Initialize velocity if not set
-                if (dockItem.springVelocity === undefined) dockItem.springVelocity = 0;
-
-                var result = root.tickSpringAdvanced(
-                    dtSec, dockItem.currentWidth, dockItem.springVelocity, targetW, stiffness, damping
-                );
-
-                var posErr = Math.abs(result.pos - targetW);
-                var velMag = Math.abs(result.vel);
-
-                // Check if this icon has settled
-                if (posErr < root.springPrecision && velMag < root.velocityPrecision) {
-                    if (dockItem.currentWidth !== targetW) {
-                        dockItem.lastWidth = targetW;
-                        dockItem.currentWidth = targetW;
-                        dockItem.springVelocity = 0;
+                var nextW = root.tickSpring(delta_time, dockItem.lastWidth, dockItem.currentWidth, targetW, 0.12, 0.47, 0.01);
+                if (root.dockMouseX === null && Math.abs(dockItem.currentWidth - root.baseWidth) < 0.05 && Math.abs(nextW - root.baseWidth) < 0.05) {
+                    if (dockItem.currentWidth !== root.baseWidth) {
+                        dockItem.lastWidth = root.baseWidth;
+                        dockItem.currentWidth = root.baseWidth;
                         needsLayout = true;
                     }
-                } else {
-                    allSettled = false;
-                    if (Math.abs(dockItem.currentWidth - result.pos) > 0.005) {
-                        dockItem.lastWidth = dockItem.currentWidth;
-                        dockItem.currentWidth = result.pos;
-                        dockItem.springVelocity = result.vel;
-                        needsLayout = true;
-                    } else {
-                        dockItem.springVelocity = result.vel;
-                    }
+                } else if (Math.abs(dockItem.currentWidth - nextW) > 0.005) {
+                    dockItem.lastWidth = dockItem.currentWidth;
+                    dockItem.currentWidth = nextW;
+                    needsLayout = true;
                 }
             }
 
             // Force Row to reposition siblings when widths change
             if (needsLayout) {
                 itemsRow.forceLayout();
-            }
-
-            // Sleep ticker when all icons have settled and no drag active
-            if (allSettled && !mouseEngaged && !draggedInstance) {
+            } else if (root.dockMouseX === null && !draggedInstance) {
+                // All icons have reached base width and mouse is away — sleep ticker to save CPU
                 physicsTicker.running = false;
             }
 

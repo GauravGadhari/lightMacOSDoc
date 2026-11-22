@@ -11,7 +11,6 @@ Item {
     // Spring state (driven by DockContainer's physicsTicker)
     property real lastWidth: 57.6
     property real currentWidth: 57.6
-    property real springVelocity: 0.0  // px/sec — proper velocity state for semi-implicit Euler
 
     // ── Morph Progress: 0.0 = collapsed/invisible, 1.0 = fully expanded ──
     // Items start at 1.0. Dynamically added items set to 0.0 and animate in onCompleted.
