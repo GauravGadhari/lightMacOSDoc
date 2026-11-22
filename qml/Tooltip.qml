@@ -10,17 +10,17 @@ Item {
     height: pill.height
 
     opacity: visibleTooltip ? 1.0 : 0.0
-    scale: visibleTooltip ? 1.0 : 0.85
-    y: visibleTooltip ? -pill.height - 12 : -pill.height - 4
+    scale: visibleTooltip ? 1.0 : 0.82
+    y: visibleTooltip ? -pill.height - 12 : -pill.height - 2
 
     Behavior on opacity {
-        NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
+        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
     }
     Behavior on scale {
-        NumberAnimation { duration: 150; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+        NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 1.3 }
     }
     Behavior on y {
-        NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
+        NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 0.8 }
     }
 
     Rectangle {

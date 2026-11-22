@@ -31,19 +31,20 @@ Item {
 
     Behavior on animProgress {
         NumberAnimation {
-            duration: root.showPreview ? 240 : 130
-            easing.type: root.showPreview ? Easing.OutBack : Easing.OutQuad
-            easing.overshoot: 1.25
+            duration: root.showPreview ? 300 : 150
+            easing.type: root.showPreview ? Easing.OutBack : Easing.InCubic
+            easing.overshoot: 1.4
         }
     }
 
-    opacity: Math.max(0.0, Math.min(1.0, showPreview ? (animProgress * 1.5) : animProgress))
-    scale: 0.88 + 0.12 * animProgress
+    // Smooth fade with a slight lead for opacity (appears before fully scaled)
+    opacity: Math.max(0.0, Math.min(1.0, showPreview ? (animProgress * 1.4) : animProgress * animProgress))
+    scale: 0.85 + 0.15 * animProgress
     visible: opacity > 0.005 && winCount > 0
 
     transformOrigin: Item.Bottom
     transform: Translate {
-        y: (1.0 - animProgress) * 16
+        y: (1.0 - animProgress) * 20
     }
 
     // Clamp horizontal position so previews near screen edges never clip off-screen
@@ -88,6 +89,7 @@ Item {
             model: (root.appData && root.appData.windows && root.showPreview) ? root.appData.windows : []
 
             WindowPreviewCard {
+                id: previewCard
                 required property var modelData
                 required property int index
 
@@ -97,6 +99,35 @@ Item {
                 windowActive: modelData.active || false
                 appIcon: root.appIcon
                 width: root.cardWidth
+
+                // ── Staggered entrance: each card slides up with a slight delay ──
+                property real cardEntrance: 0.0
+                opacity: cardEntrance
+                transform: Translate { y: (1.0 - previewCard.cardEntrance) * 12 }
+
+                NumberAnimation {
+                    id: cardEntranceAnim
+                    target: previewCard
+                    property: "cardEntrance"
+                    from: 0.0; to: 1.0
+                    duration: 220
+                    easing.type: Easing.OutCubic
+                }
+
+                Timer {
+                    id: cardEntranceDelay
+                    interval: previewCard.index * 40
+                    repeat: false
+                    onTriggered: cardEntranceAnim.restart()
+                }
+
+                Component.onCompleted: {
+                    if (previewCard.index > 0) {
+                        cardEntranceDelay.start();
+                    } else {
+                        cardEntranceAnim.restart();
+                    }
+                }
             }
         }
     }

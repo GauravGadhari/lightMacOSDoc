@@ -25,9 +25,9 @@ Item {
     // Hover state for subtle interactive feel
     property bool isHovered: cardMouse.containsMouse
 
-    scale: isHovered ? 1.03 : 1.0
+    scale: isHovered ? 1.035 : 1.0
     Behavior on scale {
-        NumberAnimation { duration: 150; easing.type: Easing.OutBack; easing.overshoot: 1.15 }
+        NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 1.4 }
     }
 
     // ── Drop Shadow for Sharp Window ──

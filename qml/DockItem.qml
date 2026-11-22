@@ -11,6 +11,7 @@ Item {
     // Spring state (driven by DockContainer's physicsTicker)
     property real lastWidth: 57.6
     property real currentWidth: 57.6
+    property real springVelocity: 0.0  // px/sec — proper velocity state for semi-implicit Euler
 
     // ── Morph Progress: 0.0 = collapsed/invisible, 1.0 = fully expanded ──
     // Items start at 1.0. Dynamically added items set to 0.0 and animate in onCompleted.
@@ -37,25 +38,29 @@ Item {
         target: root
         property: "swapSlideX"
         to: 0.0
-        duration: 220
-        easing.type: Easing.OutCubic
+        duration: 280
+        easing.type: Easing.OutBack
+        easing.overshoot: 1.08
     }
 
+    // Spring-based snap-back after drag release — overshoots slightly then settles
     ParallelAnimation {
         id: snapBackAnim
         NumberAnimation {
             target: root
             property: "dragOffsetX"
             to: 0.0
-            duration: 180
-            easing.type: Easing.OutCubic
+            duration: 300
+            easing.type: Easing.OutBack
+            easing.overshoot: 1.2
         }
         NumberAnimation {
             target: root
             property: "dragOffsetY"
             to: 0.0
-            duration: 180
-            easing.type: Easing.OutCubic
+            duration: 280
+            easing.type: Easing.OutBack
+            easing.overshoot: 0.8
         }
     }
 
@@ -84,6 +89,7 @@ Item {
     property bool isLaunching: false
 
     // ── Single jump (loops: 1) for switching / focusing an already running app ──
+    // Uses OutBack for the ascent (spring overshoot) and InBounce decay on landing
     SequentialAnimation {
         id: singleJumpAnim
         running: false
@@ -92,18 +98,20 @@ Item {
         NumberAnimation {
             target: bounceTranslate
             property: "y"
-            from: 0; to: -26; duration: 150
-            easing.type: Easing.OutQuad
+            from: 0; to: -22; duration: 170
+            easing.type: Easing.OutBack
+            easing.overshoot: 1.4
         }
         NumberAnimation {
             target: bounceTranslate
             property: "y"
-            from: -26; to: 0; duration: 160
-            easing.type: Easing.InQuad
+            from: -22; to: 0; duration: 200
+            easing.type: Easing.OutBounce
         }
     }
 
     // ── Continuous jump (loops: Animation.Infinite) while opening an app until window appears ──
+    // Softer, more rhythmic cadence with a breathing pause
     SequentialAnimation {
         id: continuousJumpAnim
         running: false
@@ -112,26 +120,27 @@ Item {
         NumberAnimation {
             target: bounceTranslate
             property: "y"
-            from: 0; to: -34; duration: 180
-            easing.type: Easing.OutQuad
+            from: 0; to: -30; duration: 200
+            easing.type: Easing.OutCubic
         }
         NumberAnimation {
             target: bounceTranslate
             property: "y"
-            from: -34; to: 0; duration: 180
-            easing.type: Easing.InQuad
+            from: -30; to: 0; duration: 220
+            easing.type: Easing.OutBounce
         }
-        PauseAnimation { duration: 40 }
+        PauseAnimation { duration: 80 }
     }
 
-    // Smooth return to ground when stopping continuous jump
+    // Smooth return to ground when stopping continuous jump — spring settle
     NumberAnimation {
         id: returnToGroundAnim
         target: bounceTranslate
         property: "y"
         to: 0
-        duration: 120
-        easing.type: Easing.OutQuad
+        duration: 180
+        easing.type: Easing.OutBack
+        easing.overshoot: 0.6
     }
 
     function jumpOnce() {
@@ -163,24 +172,25 @@ Item {
         onTriggered: stopContinuousJump()
     }
 
-    // ── Morph-In Animation (entry: 0.0 → 1.0) ──
+    // ── Morph-In Animation (entry: 0.0 → 1.0) — spring overshoot for lively pop-in ──
     NumberAnimation {
         id: morphInAnim
         target: root
         property: "morphProgress"
         from: 0.0; to: 1.0
-        duration: 260
-        easing.type: Easing.OutCubic
+        duration: 340
+        easing.type: Easing.OutBack
+        easing.overshoot: 1.15
     }
 
-    // ── Morph-Out Animation (exit: current → 0.0) ──
+    // ── Morph-Out Animation (exit: current → 0.0) — gentle deceleration ──
     NumberAnimation {
         id: morphOutAnim
         target: root
         property: "morphProgress"
         to: 0.0
-        duration: 240
-        easing.type: Easing.InOutCubic
+        duration: 280
+        easing.type: Easing.InOutQuad
         onFinished: {
             if (appData && appData.isRemoving) {
                 dockManager.finalizeRemoveApp(appData.id);
@@ -346,8 +356,8 @@ Item {
 
         property real removalScale: root.isMarkedForRemoval ? 0.82 : (root.isDragging ? 1.05 : 1.0)
         property real removalOpacity: root.isMarkedForRemoval ? 0.5 : 1.0
-        Behavior on removalScale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-        Behavior on removalOpacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+        Behavior on removalScale { NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
+        Behavior on removalOpacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
         opacity: Math.max(0.0, root.morphProgress * removalOpacity)
         scale: Math.max(0.01, root.morphProgress * removalScale)
@@ -427,10 +437,10 @@ Item {
 
         opacity: (appData && appData.isRunning && !root.isDragging && !appData.isRemoving) ? root.morphProgress : 0.0
 
-        Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.OutQuad } }
-        Behavior on color { ColorAnimation { duration: 200 } }
-        Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
-        Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
+        Behavior on opacity { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: 250; easing.type: Easing.InOutQuad } }
+        Behavior on width { NumberAnimation { duration: 250; easing.type: Easing.OutBack; easing.overshoot: 1.3 } }
+        Behavior on height { NumberAnimation { duration: 250; easing.type: Easing.OutBack; easing.overshoot: 1.3 } }
     }
 
     // Mouse Interaction & Drag-to-Rearrange / Remove

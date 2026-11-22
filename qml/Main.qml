@@ -38,16 +38,16 @@ Window {
     readonly property int slideDistance: 210
 
     // ═══════════════════════════════════════════════════════════════
-    // HIDE: Slide content below window, then move window down so
-    // only the top 6px remains on-screen as the trigger zone.
+    // HIDE: Slide content below window with gentle deceleration,
+    // then move window down so only the top 6px remains as trigger.
     // ═══════════════════════════════════════════════════════════════
     NumberAnimation {
         id: slideHideAnim
         target: root
         property: "dockSlideOffset"
         to: root.slideDistance
-        duration: 200
-        easing.type: Easing.InCubic
+        duration: 260
+        easing.type: Easing.InQuad
 
         onStarted: {
             dockManager.dismissAllMenus();
@@ -65,15 +65,16 @@ Window {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // SHOW: Smoothly slide content up into view.
+    // SHOW: Spring-reveal with slight overshoot for a physical feel.
     // ═══════════════════════════════════════════════════════════════
     NumberAnimation {
         id: slideShowAnim
         target: root
         property: "dockSlideOffset"
         to: 0
-        duration: 300
-        easing.type: Easing.OutCubic
+        duration: 380
+        easing.type: Easing.OutBack
+        easing.overshoot: 0.65
 
         onStarted: {
             dockManager.dismissAllMenus();
