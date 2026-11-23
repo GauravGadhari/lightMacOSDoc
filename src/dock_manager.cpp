@@ -172,8 +172,11 @@ void DockManager::updateMask(int x, int y, int width, int height) {
 void DockManager::resetMask() {
     if (!m_window) return;
 
+    int winH = m_window->height();
     int winW = m_window->width();
-    m_window->setMask(QRegion(0, 0, winW, 6));
+    bool isWayland = QGuiApplication::platformName().contains(QStringLiteral("wayland"), Qt::CaseInsensitive);
+    int maskY = isWayland ? (winH - 6) : 0;
+    m_window->setMask(QRegion(0, maskY, winW, 6));
 }
 
 QString DockManager::configFilePath() const {

@@ -25,10 +25,14 @@ static void termSignalHandler(int) {
 }
 
 int main(int argc, char *argv[]) {
-    // If user explicitly specifies QT_QPA_PLATFORM, respect it.
-    // Otherwise on Wayland sessions, default to wayland, or test behavior.
+    // Automatically choose Wayland when in a Wayland session so that
+    // LayerShellQt anchors the dock to the bottom screen edge and KPipeWire DMA-BUF screencasting works.
     if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM")) {
-        // qputenv("QT_QPA_PLATFORM", "xcb");
+        if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+            qputenv("QT_QPA_PLATFORM", "wayland");
+        } else {
+            qputenv("QT_QPA_PLATFORM", "xcb");
+        }
     }
 
     QGuiApplication app(argc, argv);
@@ -114,6 +118,8 @@ int main(int argc, char *argv[]) {
     dockManager.setPreviewProvider(previewProvider);
     dockManager.setQmlEngine(&engine);
 
+    bool isWayland = QGuiApplication::platformName().contains(QStringLiteral("wayland"), Qt::CaseInsensitive);
+    engine.rootContext()->setContextProperty("isWayland", isWayland);
     engine.rootContext()->setContextProperty("dockManager", &dockManager);
     engine.rootContext()->setContextProperty("realScreenWidth", screenWidth);
     engine.rootContext()->setContextProperty("realScreenHeight", screenHeight);

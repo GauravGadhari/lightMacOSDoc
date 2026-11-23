@@ -1,13 +1,20 @@
 import QtQuick
 import QtQuick.Window
+import org.kde.layershell as LayerShell
 
 Window {
     id: root
     visible: true
     title: "macOS Dock"
 
-    flags: Qt.FramelessWindowHint | Qt.BypassWindowManagerHint
+    flags: isWayland ? Qt.FramelessWindowHint : (Qt.FramelessWindowHint | Qt.BypassWindowManagerHint)
     color: "transparent"
+
+    LayerShell.Window.anchors: LayerShell.Window.AnchorBottom | LayerShell.Window.AnchorLeft | LayerShell.Window.AnchorRight
+    LayerShell.Window.layer: LayerShell.Window.LayerOverlay
+    LayerShell.Window.scope: "dock"
+    LayerShell.Window.exclusionZone: 0
+    LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone
 
     // Track pointer leaving the window completely
     HoverHandler {
@@ -57,9 +64,9 @@ Window {
             dockManager.dismissAllMenus();
             if (root.dockVisible) return;
             dockManager.setAutoHidden(true);
-            // MOVE (not resize!) window down. Top 6px stays on-screen = trigger.
-            // Bottom 214px is below screen edge = invisible & unreachable.
-            root.y = realScreenHeight - 6;
+            if (!isWayland) {
+                root.y = realScreenHeight - 6;
+            }
             dockManager.resetMask();
         }
     }
@@ -149,8 +156,9 @@ Window {
             // Content invisible during the window move
             dockContainer.opacity = 0;
 
-            // MOVE window to full-visible position (no resize!)
-            root.y = realScreenHeight - 380;
+            if (!isWayland) {
+                root.y = realScreenHeight - 380;
+            }
 
             // Wait for compositor to settle, then show + animate
             revealSettleTimer.restart();
@@ -178,7 +186,7 @@ Window {
         id: edgeTrigger
         anchors.left: parent.left
         anchors.right: parent.right
-        y: 0
+        anchors.bottom: parent.bottom
         height: 6
         hoverEnabled: true
         z: -1
