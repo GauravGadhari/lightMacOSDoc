@@ -78,8 +78,10 @@ Item {
         anchors.fill: parent
         nodeId: screencastingRequest.nodeId
         allowDmaBuf: true
-        visible: ready && nodeId > 0
         z: 2
+
+        onReadyChanged: console.log("[PipeWire] pipeWireItem ready:", ready, "nodeId:", nodeId, "streamSize:", streamSize.width, "x", streamSize.height)
+        onStateChanged: console.log("[PipeWire] pipeWireItem state:", state, "error:", error())
     }
 
     // ── Pure Window Screenshot Fallback / Instant Underlay ──
@@ -92,7 +94,7 @@ Item {
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
-        visible: !pipeWireItem.visible && (status === Image.Ready || implicitWidth > 0)
+        visible: !pipeWireItem.ready && (status === Image.Ready || implicitWidth > 0)
         z: 1
     }
 
