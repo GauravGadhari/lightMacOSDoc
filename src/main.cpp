@@ -25,9 +25,11 @@ static void termSignalHandler(int) {
 }
 
 int main(int argc, char *argv[]) {
-    // Force X11/XCB backend so the dock window can position itself freely at the screen bottom
-    // and use hardware input shape masks (setMask) to allow 100% click-through outside the dock pill.
-    qputenv("QT_QPA_PLATFORM", "xcb");
+    // If user explicitly specifies QT_QPA_PLATFORM, respect it.
+    // Otherwise on Wayland sessions, default to wayland, or test behavior.
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM")) {
+        // qputenv("QT_QPA_PLATFORM", "xcb");
+    }
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("macOS Dock");

@@ -323,6 +323,7 @@ Item {
             appData: root.appData
             appIcon: root.appData ? root.appData.icon : ""
             showPreview: windowPreviewLoader.active
+            dockManagerRef: dockManager
         }
     }
 

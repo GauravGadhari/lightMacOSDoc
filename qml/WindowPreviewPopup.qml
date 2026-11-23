@@ -8,9 +8,24 @@ Item {
     property var appData: null
     property bool showPreview: false
     property string appIcon: ""
+    property var dockManagerRef: null
+
+    // Track if any individual card is hovered to keep dock and popup stable
+    property bool anyCardHovered: false
 
     // Hover state to inform DockItem and DockContainer to stay visible
-    property bool isHovered: popupHoverArea.containsMouse
+    property bool isHovered: popupHoverArea.containsMouse || anyCardHovered
+
+    function updateCardHoverState() {
+        for (var i = 0; i < cardsRepeater.count; ++i) {
+            var item = cardsRepeater.itemAt(i);
+            if (item && item.isHovered) {
+                anyCardHovered = true;
+                return;
+            }
+        }
+        anyCardHovered = false;
+    }
 
     readonly property int winCount: (appData && appData.windows) ? appData.windows.length : 0
 
@@ -98,7 +113,12 @@ Item {
                 windowMinimized: modelData.minimized || false
                 windowActive: modelData.active || false
                 appIcon: root.appIcon
+                dockManagerRef: root.dockManagerRef
                 width: root.cardWidth
+
+                onIsHoveredChanged: {
+                    root.updateCardHoverState();
+                }
 
                 // ── Staggered entrance: each card slides up with a slight delay ──
                 property real cardEntrance: 0.0

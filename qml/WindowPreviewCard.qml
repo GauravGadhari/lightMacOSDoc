@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Effects
+import org.kde.taskmanager as TaskManager
+import org.kde.pipewire
 
 // Frameless Window Preview with sharp corners (no corner radius) and a smooth drop shadow
 Item {
@@ -11,10 +13,15 @@ Item {
     property bool windowMinimized: false
     property bool windowActive: false
     property string appIcon: ""
+    property var dockManagerRef: null
 
     // Width provided by parent; height dynamically derived from window aspect ratio
     width: 360
     height: {
+        if (pipeWireItem.streamSize.width > 0 && pipeWireItem.streamSize.height > 0) {
+            var calcH = width * (pipeWireItem.streamSize.height / pipeWireItem.streamSize.width);
+            return Math.min(240, Math.max(140, calcH));
+        }
         if (previewImage.implicitWidth > 0 && previewImage.implicitHeight > 0) {
             var calcH = width * (previewImage.implicitHeight / previewImage.implicitWidth);
             return Math.min(240, Math.max(140, calcH));
@@ -33,9 +40,9 @@ Item {
     // ── Drop Shadow for Sharp Window ──
     Item {
         id: shadowContainer
-        anchors.fill: previewImage
+        anchors.fill: parent
         z: -1
-        visible: previewImage.visible
+        visible: pipeWireItem.visible || previewImage.visible
 
         Rectangle {
             id: shadowSource
@@ -56,7 +63,26 @@ Item {
         }
     }
 
-    // ── Pure Window Screenshot (sharp corners, no corner radius) ──
+    readonly property string cleanUuid: root.windowId.replace("{", "").replace("}", "")
+
+    TaskManager.ScreencastingRequest {
+        id: screencastingRequest
+        uuid: root.cleanUuid
+        onNodeIdChanged: (id) => {
+            console.log("[PipeWire] Got screencast nodeId:", id, "for uuid:", root.cleanUuid);
+        }
+    }
+
+    PipeWireSourceItem {
+        id: pipeWireItem
+        anchors.fill: parent
+        nodeId: screencastingRequest.nodeId
+        allowDmaBuf: true
+        visible: ready && nodeId > 0
+        z: 2
+    }
+
+    // ── Pure Window Screenshot Fallback / Instant Underlay ──
     Image {
         id: previewImage
         anchors.fill: parent
@@ -66,13 +92,15 @@ Item {
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
-        visible: status === Image.Ready || implicitWidth > 0
+        visible: !pipeWireItem.visible && (status === Image.Ready || implicitWidth > 0)
+        z: 1
     }
 
     // ── Minimal Loading / Uncached Fallback ──
     Item {
         anchors.fill: parent
-        visible: !previewImage.visible
+        visible: !previewImage.visible && !pipeWireItem.visible
+        z: 0
 
         Image {
             anchors.centerIn: parent
@@ -94,8 +122,11 @@ Item {
         z: 10
 
         onClicked: {
-            dockManager.activateWindow(root.windowId);
-            dockManager.dismissAllMenus();
+            var mgr = root.dockManagerRef || (typeof dockManager !== "undefined" ? dockManager : null);
+            if (mgr) {
+                mgr.activateWindow(root.windowId);
+                mgr.dismissAllMenus();
+            }
         }
     }
 }
